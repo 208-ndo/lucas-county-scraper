@@ -158,21 +158,54 @@ def retry_request(url,attempts=3,timeout=30,method="GET",delay=2.0,**kwargs):
             if i<attempts:time.sleep(delay*i)
     raise last
 
-async def pw_get_html(url:str,wait_ms:int=2000)->str:
-    """Fetch a page using Playwright — bypasses TLN rate limiting."""
+async def pw_get_html(url:str,wait_ms:int=3000)->str:
+    """Fetch a page using Playwright with full browser fingerprinting."""
+    import random,time
     try:
         async with async_playwright() as p:
-            browser=await p.chromium.launch(headless=True)
+            browser=await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox","--disable-blink-features=AutomationControlled",
+                      "--disable-dev-shm-usage","--disable-gpu"]
+            )
             ctx=await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                extra_http_headers={"Accept-Language":"en-US,en;q=0.9","Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+                viewport={"width":1366,"height":768},
+                locale="en-US",
+                timezone_id="America/New_York",
+                extra_http_headers={
+                    "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language":"en-US,en;q=0.9",
+                    "Accept-Encoding":"gzip, deflate, br",
+                    "DNT":"1","Upgrade-Insecure-Requests":"1",
+                    "Sec-Fetch-Dest":"document","Sec-Fetch-Mode":"navigate",
+                    "Sec-Fetch-Site":"none","Sec-Fetch-User":"?1",
+                }
             )
+            # Mask automation signals
+            await ctx.add_init_script("""
+                Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+                Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
+            """)
             page=await ctx.new_page()
             try:
+                # First visit TLN homepage to set cookies
+                await page.goto("https://www.toledolegalnews.com/",
+                    wait_until="domcontentloaded",timeout=30000)
+                await page.wait_for_timeout(2000+random.randint(0,1000))
+                # Now visit the target page
                 await page.goto(url,wait_until="domcontentloaded",timeout=30000)
-                await page.wait_for_timeout(wait_ms)
+                await page.wait_for_timeout(wait_ms+random.randint(0,1000))
                 html=await page.content()
                 logging.info("pw_get_html: %s chars from %s",len(html),url[:80])
+                # Detect rate limit response
+                if len(html)<500 and "Too Many" in html:
+                    logging.warning("TLN rate limited on %s — waiting 10s and retrying",url[:60])
+                    await page.wait_for_timeout(10000)
+                    await page.goto(url,wait_until="domcontentloaded",timeout=30000)
+                    await page.wait_for_timeout(3000)
+                    html=await page.content()
+                    logging.info("TLN retry: %s chars",len(html))
                 return html
             finally:
                 await page.close()
@@ -374,10 +407,12 @@ def load_parcel_data()->Dict[str,dict]:
         logging.info("Loading Toledo parcel data...")
         # Try Socrata API — data.toledo.gov uses this format
         socrata_urls=[
-            "https://data.toledo.gov/resource/parcels.json?$limit=200000&$select=parcel_id,owner_name,site_addr,site_city,site_zip,mail_addr,mail_city,mail_state,mail_zip,assessed_value,land_use",
-            "https://data.toledo.gov/resource/parcels.json?$limit=200000",
-            # Lucas County GIS REST API
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/9/query?where=1%3D1&outFields=*&f=json&resultRecordCount=50000",
+            # Lucas County GIS - parcel layer with owner/address info
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/0/query?where=1%3D1&outFields=PARCEL_ID,OWNER,SITE_ADDR,SITE_CITY,SITE_ZIP,MAIL_ADDR,MAIL_CITY,MAIL_STATE,MAIL_ZIP,APPRTOT,LUC&f=json&resultRecordCount=50000&resultOffset=0",
+            # Toledo open data parcels
+            "https://data.toledo.gov/resource/k95c-9tfe.json?$limit=200000",
+            # Alternative GIS layer
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/9/query?where=1%3D1&outFields=*&f=json&resultRecordCount=1000",
         ]
         resp=None
         data_json=None
@@ -399,50 +434,36 @@ def load_parcel_data()->Dict[str,dict]:
             return parcels
         # Handle both list (Socrata) and dict (ArcGIS) response formats
         if isinstance(data_json,list):
-            features=data_json  # Socrata returns list directly
+            raw_records=data_json  # Socrata — flat list
         elif isinstance(data_json,dict):
-            features=data_json.get("features",[]) or data_json.get("value",[]) or []
+            features=data_json.get("features",[])
+            if features and isinstance(features[0],dict):
+                # ArcGIS format: features[i].attributes or features[i].properties
+                raw_records=[f.get("attributes",f.get("properties",f)) for f in features]
+            else:
+                raw_records=data_json.get("value",data_json.get("data",[]))
         else:
-            features=[]
-        logging.info("Processing %s parcel records",len(features))
-        data={"features":[{"properties":f} for f in features] if features and not isinstance(features[0],dict) or (features and "properties" not in features[0]) else features}
-        # Normalize — handle both flat Socrata and nested GeoJSON
-        if features and isinstance(features[0],dict) and "properties" not in features[0]:
-            # Socrata flat format
-            raw_records=features
-        else:
-            raw_records=[f.get("properties",f) for f in features]
+            raw_records=[]
         logging.info("Parcel records to process: %s",len(raw_records))
+        # Log first record to see field names
+        if raw_records:
+            save_debug_json("parcel_fields.json",list(raw_records[0].keys())[:30] if raw_records[0] else [])
+            logging.info("Parcel fields: %s",list(raw_records[0].keys())[:10])
         for props in raw_records:
             if not props or not isinstance(props,dict):continue
+            # Normalize ArcGIS uppercase field names to expected format
+            props={k.upper():v for k,v in props.items()}
             # Toledo parcel fields vary — try common names
-            owner=(clean_text(props.get("OWNER_NAME","")) or
-                   clean_text(props.get("OWNERNAME","")) or
-                   clean_text(props.get("owner_name","")) or
-                   clean_text(props.get("owner","")) or "")
-            addr=(clean_text(props.get("SITE_ADDR","")) or
-                  clean_text(props.get("SITEADDR","")) or
-                  clean_text(props.get("site_addr","")) or
-                  clean_text(props.get("address","")) or
-                  clean_text(props.get("ADDRESS","")) or "")
-            city=(clean_text(props.get("SITE_CITY","")) or
-                  clean_text(props.get("site_city","")) or
-                  clean_text(props.get("CITY","")) or "Toledo")
-            zip_=(clean_text(props.get("SITE_ZIP","")) or
-                  clean_text(props.get("ZIP","")) or
-                  clean_text(props.get("ZIPCODE","")) or "")
-            mail_addr=(clean_text(props.get("MAIL_ADDR","")) or
-                       clean_text(props.get("MAILADR1","")) or
-                       clean_text(props.get("mail_addr","")) or "")
-            mail_city=(clean_text(props.get("MAIL_CITY","")) or
-                       clean_text(props.get("mailcity","")) or "")
-            mail_state=(clean_text(props.get("MAIL_STATE","")) or
-                        clean_text(props.get("mailstate","")) or "OH")
-            mail_zip=(clean_text(props.get("MAIL_ZIP","")) or
-                      clean_text(props.get("mailzip","")) or "")
-            parcel_id=(clean_text(props.get("PARCEL_ID","")) or
-                       clean_text(props.get("PARCELID","")) or
-                       clean_text(props.get("parcel_id","")) or "")
+            # All keys already uppercased — try all common field name variants
+            owner=clean_text(props.get("OWNER","") or props.get("OWNER_NAME","") or props.get("OWNERNAME","") or props.get("OWN1","") or "")
+            addr=clean_text(props.get("SITE_ADDR","") or props.get("SITEADDR","") or props.get("ADDRESS","") or props.get("SADDR","") or "")
+            city=clean_text(props.get("SITE_CITY","") or props.get("CITY","") or props.get("SCITY","") or "") or "Toledo"
+            zip_=clean_text(props.get("SITE_ZIP","") or props.get("ZIP","") or props.get("ZIPCODE","") or props.get("SZIP","") or "")
+            mail_addr=clean_text(props.get("MAIL_ADDR","") or props.get("MAILADR1","") or props.get("MAIL_ADDRESS","") or "")
+            mail_city=clean_text(props.get("MAIL_CITY","") or props.get("MAILCITY","") or "")
+            mail_state=clean_text(props.get("MAIL_STATE","") or props.get("MAILSTATE","") or "") or "OH"
+            mail_zip=clean_text(props.get("MAIL_ZIP","") or props.get("MAILZIP","") or "")
+            parcel_id=clean_text(props.get("PARCEL_ID","") or props.get("PARCELID","") or props.get("PARID","") or props.get("PID","") or "")
             assessed=None
             for k in ["ASSESSED_VALUE","ASSDVAL","TOTAL_APPR","TOTALAPPR","assessed_value"]:
                 v=clean_text(props.get(k,""))
