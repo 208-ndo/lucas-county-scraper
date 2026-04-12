@@ -48,9 +48,18 @@ TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_court/"
 TLN_DIVORCE_URL       = "https://www.toledolegalnews.com/legal_notices/dissolutions/"
 
 # Parcel data — Toledo open data hub (GeoJSON with owner/address/value)
-TOLEDO_PARCELS_URL    = "https://data.toledo.gov/datasets/Toledo::parcels/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=Toledo::parcels&outputFormat=application%2Fjson&count=200000"
+# Toledo parcel data — multiple URL attempts
+TOLEDO_PARCELS_URLS = [
+    # ArcGIS FeatureServer REST API (most reliable)
+    "https://data.toledo.gov/datasets/Toledo::parcels.geojson?outSR=%7B%22latestWkid%22%3A4326%7D&where=1%3D1&outFields=*",
+    # Direct GeoJSON download
+    "https://opendata.arcgis.com/datasets/Toledo::parcels.geojson",
+    # WFS format
+    "https://data.toledo.gov/api/download/v1/items/Toledo::parcels/geojson?layers=0",
+]
+TOLEDO_PARCELS_URL = TOLEDO_PARCELS_URLS[0]
 # Lucas County Treasurer delinquent list
-LUCAS_TREASURER_URL   = "https://treasurer.co.lucas.oh.us/"
+LUCAS_TREASURER_URL   = "https://co.lucas.oh.us/500/Treasurer"
 # Lucas County Auditor AREIS (iasWorld)
 AREIS_URL             = "https://icare.co.lucas.oh.us/LucasCare/search/commonsearch.aspx?mode=address"
 # Lucas County clerk records
@@ -125,15 +134,25 @@ def normalize_state(v:str)->str:
     v=re.sub(r"[^A-Z]","",v)
     return v if v in STATE_CODES else ""
 
-def retry_request(url,attempts=3,timeout=30,method="GET",**kwargs):
+def retry_request(url,attempts=3,timeout=30,method="GET",delay=2.0,**kwargs):
+    """Retry with exponential backoff. TLN rate-limits aggressively."""
+    import time
     last=None
+    # Skip non-http URLs immediately
+    if not url.startswith("http"):
+        raise ValueError(f"Invalid URL: {url[:80]}")
+    # Skip social/email share links
+    if any(x in url for x in ["facebook.com","twitter.com","linkedin.com","mailto:"]):
+        raise ValueError(f"Skipping social URL: {url[:80]}")
     for i in range(1,attempts+1):
         try:
             if method=="POST":r=requests.post(url,headers=HEADERS,timeout=timeout,**kwargs)
             else:r=requests.get(url,headers=HEADERS,timeout=timeout,allow_redirects=True,**kwargs)
             r.raise_for_status();return r
         except Exception as e:
-            last=e;logging.warning("Request failed (%s/%s) %s: %s",i,attempts,url,e)
+            last=e
+            logging.warning("Request failed (%s/%s) %s: %s",i,attempts,url,e)
+            if i<attempts:time.sleep(delay*i)  # exponential backoff
     raise last
 
 def parse_amount(v:str)->Optional[float]:
@@ -326,7 +345,20 @@ def load_parcel_data()->Dict[str,dict]:
     parcels:Dict[str,dict]={}
     try:
         logging.info("Loading Toledo parcel data from data.toledo.gov...")
-        resp=retry_request(TOLEDO_PARCELS_URL,timeout=120)
+        resp=None
+        for purl in TOLEDO_PARCELS_URLS:
+            try:
+                logging.info("Trying parcel URL: %s",purl[:80])
+                resp=retry_request(purl,timeout=120)
+                if resp and len(resp.content)>1000:
+                    logging.info("Parcel URL success: %s bytes",len(resp.content))
+                    break
+            except Exception as pe:
+                logging.warning("Parcel URL failed: %s",pe)
+                resp=None
+        if not resp:
+            logging.warning("All parcel URLs failed")
+            return parcels
         data=resp.json()
         features=data.get("features",[])
         logging.info("Parcel GeoJSON: %s features",len(features))
@@ -608,10 +640,10 @@ def scrape_tln_liens()->List[LeadRecord]:
     logging.info("Scraping liens...")
     recs=[]
     for url,dt in [
-        (TLN_LIENS_URL+"/child_support_enforcement_liens/","LN"),
-        (TLN_LIENS_URL+"/mechanics_liens/","LNMECH"),
-        (TLN_LIENS_URL+"/lucas_county_commonples_court_liens/","LN"),
-        (TLN_LIENS_URL+"/us_tax_liens/","LNFED"),
+        (TLN_LIENS_URL+"child_support_enforcement_liens/","LN"),
+        (TLN_LIENS_URL+"mechanics_liens/","LNMECH"),
+        (TLN_LIENS_URL+"lucas_county_commonples_court_liens/","LN"),
+        (TLN_LIENS_URL+"us_tax_liens/","LNFED"),
     ]:
         try:
             r=scrape_tln_page(url,dt)
@@ -633,9 +665,16 @@ def scrape_tln_common_pleas()->List[LeadRecord]:
         links=[]
         for a in soup.select("a[href]"):
             href=clean_text(a.get("href",""))
-            if "common_pleas" in href and ("filings" in href or "received" in href):
-                full=requests.compat.urljoin(TLN_BASE,href)
-                if full not in links:links.append(full)
+            # Skip social share / mailto / external links
+            if any(x in href for x in ["facebook","twitter","mailto","linkedin","utm_source"]):
+                continue
+            if "common_pleas" in href and ("filings" in href or "received" in href or "article" in href):
+                if href.startswith("http"):
+                    full=href
+                else:
+                    full=requests.compat.urljoin(TLN_BASE,href)
+                if full not in links and "toledolegalnews.com" in full:
+                    links.append(full)
         logging.info("Common Pleas daily filing pages: %s",len(links))
         for url in links[:7]:  # last 7 days
             try:
@@ -701,7 +740,7 @@ def scrape_lucas_tax_delinquent()->List[LeadRecord]:
         logging.info("Scraping tax delinquent...")
         urls=[
             "https://www.toledolegalnews.com/legal_notices/foreclosures/",
-            "https://treasurer.co.lucas.oh.us/",
+            "https://co.lucas.oh.us/500/Treasurer",
         ]
         for url in urls:
             try:
@@ -903,12 +942,13 @@ async def main():
     # 2. Scrape all sources
     all_records:List[LeadRecord]=[]
 
-    sheriff    = scrape_tln_sheriff_sales()
-    foreclos   = scrape_tln_foreclosures()
-    liens      = scrape_tln_liens()
-    common_pl  = scrape_tln_common_pleas()
-    probate    = scrape_tln_probate()
-    divorce    = scrape_tln_divorce()
+    import time
+    sheriff    = scrape_tln_sheriff_sales();   time.sleep(3)
+    foreclos   = scrape_tln_foreclosures();    time.sleep(3)
+    liens      = scrape_tln_liens();           time.sleep(3)
+    common_pl  = scrape_tln_common_pleas();    time.sleep(3)
+    probate    = scrape_tln_probate();         time.sleep(3)
+    divorce    = scrape_tln_divorce();         time.sleep(3)
     tax_delin  = scrape_lucas_tax_delinquent()
 
     all_records = sheriff+foreclos+liens+common_pl+probate+divorce+tax_delin
