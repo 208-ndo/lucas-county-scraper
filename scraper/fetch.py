@@ -38,24 +38,28 @@ OH_APPRECIATION = 0.04
 
 # ── URLs ──────────────────────────────────────────────────────────────────
 TLN_BASE              = "https://www.toledolegalnews.com"
-TLN_SHERIFF_URL       = "https://www.toledolegalnews.com/legal_notices/foreclosure_sherrif_sales_lucas/"
-TLN_TAX_SHERIFF_URL   = "https://www.toledolegalnews.com/taxsale/index/sortby/city/ascdesc/desc/page/1"
-TLN_FORECLOSURES_URL  = "https://www.toledolegalnews.com/legal_notices/foreclosures/"
+TLN_SHERIFF_URL       = "https://www.toledolegalnews.com/legal_notices/sherrif_sales_lucas/"
+TLN_TAX_SHERIFF_URL   = "https://www.toledolegalnews.com/legal_notices/tax_sherrif_sales/"
+TLN_FORECLOSURES_URL  = "https://www.toledolegalnews.com/legal_notices/notice_of_foreclosure_complaints/"
 TLN_LIENS_URL         = "https://www.toledolegalnews.com/liens/"
-TLN_COMMON_PLEAS_URL  = "https://www.toledolegalnews.com/courts/common_pleas/"
-TLN_PROBATE_URL       = "https://www.toledolegalnews.com/courts/lucas_co_probate_court/"
-TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_court/"
-TLN_DIVORCE_URL       = "https://www.toledolegalnews.com/legal_notices/dissolutions/"
+TLN_LIEN_MECH_URL     = "https://www.toledolegalnews.com/liens/mechanics/"
+TLN_LIEN_TAX_URL      = "https://www.toledolegalnews.com/liens/us_tax/"
+TLN_LIEN_CHILD_URL    = "https://www.toledolegalnews.com/liens/child_support/"
+TLN_LIEN_COURT_URL    = "https://www.toledolegalnews.com/liens/lucas_county_commonpleas_court/"
+TLN_COMMON_PLEAS_URL  = "https://www.toledolegalnews.com/courts/common_pleas_court_of_lucas_county/"
+TLN_PROBATE_URL       = "https://www.toledolegalnews.com/courts/probate_court_of_lucas_county/"
+TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_court_of_lucas_county/"
+TLN_DIVORCE_URL       = "https://www.toledolegalnews.com/legal_notices/divorce/"
 
 # Parcel data — Toledo open data hub (GeoJSON with owner/address/value)
-# Toledo parcel data — multiple URL attempts
+# Toledo parcel data — ArcGIS REST API (correct format)
 TOLEDO_PARCELS_URLS = [
-    # ArcGIS FeatureServer REST API (most reliable)
-    "https://data.toledo.gov/datasets/Toledo::parcels.geojson?outSR=%7B%22latestWkid%22%3A4326%7D&where=1%3D1&outFields=*",
-    # Direct GeoJSON download
-    "https://opendata.arcgis.com/datasets/Toledo::parcels.geojson",
-    # WFS format
-    "https://data.toledo.gov/api/download/v1/items/Toledo::parcels/geojson?layers=0",
+    # ArcGIS FeatureServer — paginated to avoid timeouts
+    "https://services2.arcgis.com/qvkbeam8lgZ7xKP2/arcgis/rest/services/Parcels/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson&resultRecordCount=50000",
+    # Backup: data.toledo.gov direct API
+    "https://data.toledo.gov/api/explore/v2.1/catalog/datasets/parcels/exports/geojson?limit=-1",
+    # Fallback: AREIS iasWorld API
+    "https://icare.co.lucas.oh.us/LucasCare/search/commonsearch.aspx?mode=address",
 ]
 TOLEDO_PARCELS_URL = TOLEDO_PARCELS_URLS[0]
 # Lucas County Treasurer delinquent list
@@ -135,15 +139,13 @@ def normalize_state(v:str)->str:
     return v if v in STATE_CODES else ""
 
 def retry_request(url,attempts=3,timeout=30,method="GET",delay=2.0,**kwargs):
-    """Retry with exponential backoff. TLN rate-limits aggressively."""
+    """Retry with exponential backoff."""
     import time
     last=None
-    # Skip non-http URLs immediately
     if not url.startswith("http"):
         raise ValueError(f"Invalid URL: {url[:80]}")
-    # Skip social/email share links
     if any(x in url for x in ["facebook.com","twitter.com","linkedin.com","mailto:"]):
-        raise ValueError(f"Skipping social URL: {url[:80]}")
+        raise ValueError(f"Skipping social URL")
     for i in range(1,attempts+1):
         try:
             if method=="POST":r=requests.post(url,headers=HEADERS,timeout=timeout,**kwargs)
@@ -152,8 +154,35 @@ def retry_request(url,attempts=3,timeout=30,method="GET",delay=2.0,**kwargs):
         except Exception as e:
             last=e
             logging.warning("Request failed (%s/%s) %s: %s",i,attempts,url,e)
-            if i<attempts:time.sleep(delay*i)  # exponential backoff
+            if i<attempts:time.sleep(delay*i)
     raise last
+
+# Shared Playwright browser for TLN scraping (bypasses 429 rate limiting)
+_pw_browser=None
+_pw_context=None
+
+async def pw_get_html(url:str,wait_ms:int=2000)->str:
+    """Fetch a page using Playwright — bypasses TLN rate limiting."""
+    global _pw_browser,_pw_context
+    try:
+        if not _pw_browser:
+            from playwright.async_api import async_playwright
+            _pw=await async_playwright().__aenter__()
+            _pw_browser=await _pw.chromium.launch(headless=True)
+            _pw_context=await _pw_browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+            )
+        page=await _pw_context.new_page()
+        try:
+            await page.goto(url,wait_until="domcontentloaded",timeout=30000)
+            await page.wait_for_timeout(wait_ms)
+            html=await page.content()
+            return html
+        finally:
+            await page.close()
+    except Exception as e:
+        logging.warning("Playwright fetch failed %s: %s",url,e)
+        return ""
 
 def parse_amount(v:str)->Optional[float]:
     if not v:return None
@@ -499,13 +528,14 @@ def split_vs(caption:str)->Tuple[str,str]:
             if len(parts)==2:return clean_text(parts[0]),clean_text(parts[1])
     return "",""
 
-def scrape_tln_page(url:str,doc_type_hint:str=None)->List[LeadRecord]:
-    """Scrape a Toledo Legal News listing page for leads."""
+async def scrape_tln_page(url:str,doc_type_hint:str=None)->List[LeadRecord]:
+    """Scrape a Toledo Legal News listing page for leads using Playwright."""
     records:List[LeadRecord]=[]
     try:
-        resp=retry_request(url,timeout=30)
-        soup=BeautifulSoup(resp.text,"lxml")
-        save_debug_text(f"tln_{doc_type_hint or 'page'}.html",resp.text[:5000])
+        html=await pw_get_html(url)
+        if not html:return records
+        soup=BeautifulSoup(html,"lxml")
+        save_debug_text(f"tln_{doc_type_hint or 'page'}.html",html[:5000])
         text=soup.get_text(" ")
 
         # Try table rows
@@ -581,14 +611,15 @@ def scrape_tln_page(url:str,doc_type_hint:str=None)->List[LeadRecord]:
     except Exception as e:logging.warning("TLN scrape %s failed: %s",url,e)
     return records
 
-def scrape_tln_sheriff_sales()->List[LeadRecord]:
+async def scrape_tln_sheriff_sales()->List[LeadRecord]:
     records:List[LeadRecord]=[]
     try:
         logging.info("Scraping sheriff sales...")
         for url in [TLN_SHERIFF_URL,TLN_TAX_SHERIFF_URL]:
-            resp=retry_request(url,timeout=30)
-            soup=BeautifulSoup(resp.text,"lxml")
-            save_debug_text("sheriff_page.html",resp.text[:5000])
+            html=await pw_get_html(url)
+            if not html:continue
+            soup=BeautifulSoup(html,"lxml")
+            save_debug_text("sheriff_page.html",html[:5000])
             # TLN sheriff sale format: case# | address | amount | date
             for row in soup.select("tr"):
                 cells=[clean_text(td.get_text(" ")) for td in row.select("td")]
@@ -630,23 +661,23 @@ def scrape_tln_sheriff_sales()->List[LeadRecord]:
     except Exception as e:logging.warning("Sheriff sales failed: %s",e)
     return records
 
-def scrape_tln_foreclosures()->List[LeadRecord]:
+async def scrape_tln_foreclosures()->List[LeadRecord]:
     logging.info("Scraping foreclosures / lis pendens...")
-    recs=scrape_tln_page(TLN_FORECLOSURES_URL,"NOFC")
+    recs=await scrape_tln_page(TLN_FORECLOSURES_URL,"NOFC")
     logging.info("Foreclosures: %s",len(recs))
     return recs
 
-def scrape_tln_liens()->List[LeadRecord]:
+async def scrape_tln_liens()->List[LeadRecord]:
     logging.info("Scraping liens...")
     recs=[]
     for url,dt in [
-        (TLN_LIENS_URL+"child_support_enforcement_liens/","LN"),
-        (TLN_LIENS_URL+"mechanics_liens/","LNMECH"),
-        (TLN_LIENS_URL+"lucas_county_commonples_court_liens/","LN"),
-        (TLN_LIENS_URL+"us_tax_liens/","LNFED"),
+        (TLN_LIEN_CHILD_URL,"LN"),
+        (TLN_LIEN_MECH_URL,"LNMECH"),
+        (TLN_LIEN_COURT_URL,"LN"),
+        (TLN_LIEN_TAX_URL,"LNFED"),
     ]:
         try:
-            r=scrape_tln_page(url,dt)
+            r=await scrape_tln_page(url,dt)
             recs.extend(r)
             logging.info("Liens from %s: %s",url,len(r))
         except Exception as e:
@@ -654,13 +685,13 @@ def scrape_tln_liens()->List[LeadRecord]:
     logging.info("Total liens: %s",len(recs))
     return recs
 
-def scrape_tln_common_pleas()->List[LeadRecord]:
+async def scrape_tln_common_pleas()->List[LeadRecord]:
     """Scrape Toledo Legal News Common Pleas daily filings for LP, foreclosure, liens."""
     records:List[LeadRecord]=[]
     try:
         logging.info("Scraping Common Pleas filings...")
-        resp=retry_request(TLN_COMMON_PLEAS_URL,timeout=30)
-        soup=BeautifulSoup(resp.text,"lxml")
+        html=await pw_get_html(TLN_COMMON_PLEAS_URL)
+        soup=BeautifulSoup(html,"lxml")
         # Find links to recent daily filing pages
         links=[]
         for a in soup.select("a[href]"):
@@ -678,7 +709,7 @@ def scrape_tln_common_pleas()->List[LeadRecord]:
         logging.info("Common Pleas daily filing pages: %s",len(links))
         for url in links[:7]:  # last 7 days
             try:
-                r=scrape_tln_page(url)
+                r=await scrape_tln_page(url)
                 records.extend(r)
             except Exception as e:
                 logging.warning("Common Pleas page %s: %s",url,e)
@@ -686,12 +717,13 @@ def scrape_tln_common_pleas()->List[LeadRecord]:
     except Exception as e:logging.warning("Common Pleas failed: %s",e)
     return records
 
-def scrape_tln_probate()->List[LeadRecord]:
+async def scrape_tln_probate()->List[LeadRecord]:
     logging.info("Scraping probate / estate...")
     records:List[LeadRecord]=[]
     try:
-        resp=retry_request(TLN_PROBATE_URL,timeout=30)
-        soup=BeautifulSoup(resp.text,"lxml")
+        html=await pw_get_html(TLN_PROBATE_URL)
+        if not html:return records
+        soup=BeautifulSoup(html,"lxml")
         text=soup.get_text(" ")
         save_debug_text("probate_text.txt",text[:5000])
         estate_pat=re.compile(
@@ -719,18 +751,18 @@ def scrape_tln_probate()->List[LeadRecord]:
     except Exception as e:logging.warning("Probate failed: %s",e)
     return records
 
-def scrape_tln_divorce()->List[LeadRecord]:
+async def scrape_tln_divorce()->List[LeadRecord]:
     logging.info("Scraping divorces...")
-    recs=scrape_tln_page(TLN_DIVORCE_URL,"DIVORCE")
+    recs=await scrape_tln_page(TLN_DIVORCE_URL,"DIVORCE")
     # Also try domestic court page
     try:
-        r2=scrape_tln_page(TLN_DOMESTIC_URL,"DIVORCE")
+        r2=await scrape_tln_page(TLN_DOMESTIC_URL,"DIVORCE")
         recs.extend(r2)
     except:pass
     logging.info("Divorces: %s",len(recs))
     return recs
 
-def scrape_lucas_tax_delinquent()->List[LeadRecord]:
+async def scrape_lucas_tax_delinquent()->List[LeadRecord]:
     """
     Scrape Lucas County tax delinquent list.
     Toledo Legal News publishes the official delinquent list.
@@ -744,8 +776,9 @@ def scrape_lucas_tax_delinquent()->List[LeadRecord]:
         ]
         for url in urls:
             try:
-                resp=retry_request(url,timeout=30)
-                soup=BeautifulSoup(resp.text,"lxml")
+                html=await pw_get_html(url)
+                if not html:continue
+                soup=BeautifulSoup(html,"lxml")
                 text=soup.get_text(" ")
                 # Look for delinquent parcel patterns
                 # TF (tax foreclosure) case numbers
@@ -942,14 +975,13 @@ async def main():
     # 2. Scrape all sources
     all_records:List[LeadRecord]=[]
 
-    import time
-    sheriff    = scrape_tln_sheriff_sales();   time.sleep(3)
-    foreclos   = scrape_tln_foreclosures();    time.sleep(3)
-    liens      = scrape_tln_liens();           time.sleep(3)
-    common_pl  = scrape_tln_common_pleas();    time.sleep(3)
-    probate    = scrape_tln_probate();         time.sleep(3)
-    divorce    = scrape_tln_divorce();         time.sleep(3)
-    tax_delin  = scrape_lucas_tax_delinquent()
+    sheriff    = await scrape_tln_sheriff_sales()
+    foreclos   = await scrape_tln_foreclosures()
+    liens      = await scrape_tln_liens()
+    common_pl  = await scrape_tln_common_pleas()
+    probate    = await scrape_tln_probate()
+    divorce    = await scrape_tln_divorce()
+    tax_delin  = await scrape_lucas_tax_delinquent()
 
     all_records = sheriff+foreclos+liens+common_pl+probate+divorce+tax_delin
     logging.info("Total before enrich: %s",len(all_records))
