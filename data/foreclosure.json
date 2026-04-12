@@ -1,7 +1,7 @@
 [
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -24,8 +24,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -36,7 +38,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -59,8 +61,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -71,7 +75,7 @@
   },
   {
     "owner": "named above be required to answer and assert any interest in said real property or be forever barred from asserting any interest therein, for foreclosure of said mortgage, marshalling of liens, and the sale of said real property, and that the proceeds of said sale be applied according to law",
-    "prop_address": "",
+    "prop_address": "1938 Welker Ave.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -106,7 +110,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -129,8 +133,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -141,7 +147,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -164,8 +170,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -176,7 +184,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -199,8 +207,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -211,7 +221,7 @@
   },
   {
     "owner": "Unknown Heirs at Law, Devisees, Legatees, Executors and Administrators of Terrence M",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -234,8 +244,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -246,7 +258,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -269,8 +281,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -281,7 +295,7 @@
   },
   {
     "owner": "Defendants, Johnita Foy, Unknown Spouse of Johnita Foy, if any, and The Unknown Heirs, Assigns, Legatees and Devisees of Joseph F",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -304,8 +318,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -316,7 +332,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -339,8 +355,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -351,7 +369,7 @@
   },
   {
     "owner": "",
-    "prop_address": "965 Fries Ave",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -374,8 +392,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -386,7 +406,7 @@
   },
   {
     "owner": "named above be required to answer and set up their interest in said real estate or be forever barred from asserting the same, for foreclosure of said mortgage, the marshaling of any liens, and the sale of said real estate, and the proceeds of said sale applied to the payment of plaintiffs claim in the proper order of its priority and for such other and further relief as is just and equitable",
-    "prop_address": "3040 Maeterlinck Ave.",
+    "prop_address": "3040 Maeterlinck Ave",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -421,7 +441,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -444,8 +464,47 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
+    "hot_stack": false,
+    "is_absentee": false,
+    "is_out_of_state": false,
+    "is_vacant_land": false,
+    "is_inherited": false,
+    "phone": "",
+    "tags": []
+  },
+  {
+    "owner": "",
+    "prop_address": "247 Gradolph St",
+    "prop_city": "Toledo",
+    "prop_zip": "",
+    "mail_address": "",
+    "mail_city": "",
+    "mail_state": "",
+    "mail_zip": "",
+    "doc_type": "Foreclosure",
+    "filed": "",
+    "amount": null,
+    "doc_num": "CI2026-00389",
+    "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00389/article_04ee47e6-c246-4efd-b2da-b79ffff6fcb8.html",
+    "parcel_id": "",
+    "luc": "",
+    "acres": "",
+    "est_market_value": null,
+    "assessed_value": null,
+    "last_sale_price": null,
+    "score": 40,
+    "flags": [
+      "Pre-foreclosure",
+      "Lis pendens"
+    ],
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -456,7 +515,7 @@
   },
   {
     "owner": "Case No",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -479,8 +538,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -526,7 +587,7 @@
   },
   {
     "owner": "Judge Stacy L",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -549,8 +610,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -561,7 +624,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -584,8 +647,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -596,7 +661,7 @@
   },
   {
     "owner": "Judge Lori Olender Taomi L",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -619,8 +684,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -631,7 +698,7 @@
   },
   {
     "owner": "Joshua McMillan",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -654,8 +721,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -666,7 +735,7 @@
   },
   {
     "owner": "named above be required to answer and assert any interest in said real property or be forever barred from asserting any interest therein, for foreclosure of said mortgage, marshalling of liens, and the sale of said real property, and that the proceeds of said sale be applied according to law",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -689,8 +758,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -701,7 +772,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -724,8 +795,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -736,7 +809,7 @@
   },
   {
     "owner": "have or may have an interest in this Real Estate",
-    "prop_address": "1123 Radcliffe Dr",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -759,8 +832,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -771,7 +846,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -794,43 +869,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
-    "hot_stack": false,
-    "is_absentee": false,
-    "is_out_of_state": false,
-    "is_vacant_land": false,
-    "is_inherited": false,
-    "phone": "",
-    "tags": []
-  },
-  {
-    "owner": "named above be required to answer and assert any interest in said real property or be forever barred from asserting any interest therein, for foreclosure of said mortgage, marshalling of liens, and the sale of said real property, and that the proceeds of said sale be applied according to law",
-    "prop_address": "",
-    "prop_city": "Toledo",
-    "prop_zip": "",
-    "mail_address": "",
-    "mail_city": "",
-    "mail_state": "",
-    "mail_zip": "",
-    "doc_type": "Foreclosure",
-    "filed": "",
-    "amount": 61580.75,
-    "doc_num": "CI2025-04348",
-    "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04348/article_47f97cce-14e7-4e5b-a8cc-db94313a892f.html",
-    "parcel_id": "",
-    "luc": "",
-    "acres": "",
-    "est_market_value": null,
-    "assessed_value": null,
-    "last_sale_price": null,
-    "score": 45,
-    "flags": [
-      "Pre-foreclosure",
-      "Lis pendens"
+    "distress_sources": [
+      "Foreclosure"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -876,7 +918,7 @@
   },
   {
     "owner": "named above be required to answer and assert any interest in said property or be forever barred from asserting any interest therein, for foreclosure of said mortgage, marshalling of liens, and the sale of said real property, and the proceeds of said sale be applied according to law",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -899,8 +941,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -911,7 +955,7 @@
   },
   {
     "owner": "Judge Michael R",
-    "prop_address": "",
+    "prop_address": "700 Adams St.",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -934,8 +978,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -1016,7 +1062,7 @@
   },
   {
     "owner": "Mark Feaster, Sr, Jane Doe, name unknown, spouse of Mark Feaster, Sr",
-    "prop_address": "",
+    "prop_address": "938 Ambia St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -1051,7 +1097,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -1074,8 +1120,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -1086,7 +1134,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -1109,8 +1157,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -1121,7 +1171,7 @@
   },
   {
     "owner": "named above be required to answer and assert any interest in said real property or be forever barred from asserting any interest therein, for foreclosure of said mortgage, marshalling of liens, and the sale of said real property, and that the proceeds of said sale be applied according to law",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -1144,8 +1194,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
@@ -1156,7 +1208,7 @@
   },
   {
     "owner": "",
-    "prop_address": "",
+    "prop_address": "247 Gradolph St",
     "prop_city": "Toledo",
     "prop_zip": "",
     "mail_address": "",
@@ -1179,8 +1231,10 @@
       "Pre-foreclosure",
       "Lis pendens"
     ],
-    "distress_sources": [],
-    "distress_count": 0,
+    "distress_sources": [
+      "Foreclosure"
+    ],
+    "distress_count": 1,
     "hot_stack": false,
     "is_absentee": false,
     "is_out_of_state": false,
