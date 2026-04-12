@@ -1,15 +1,18 @@
 [
-  "date",
+  "lucas_created_date",
+  "legacy_created_date",
   "created_user",
+  "lucas_last_edit_date",
   "globalid",
+  "assessor_number",
   "last_edited_user",
-  "taxdist",
-  "name",
-  "schdist",
+  "lucas_last_editor",
+  "lucas_created_user",
+  "legacy_editor",
   "last_edited_date",
   "created_date",
   "SHAPE__Length",
-  "juris",
+  "class",
   "objectid",
   "SHAPE__Area"
 ]
