@@ -1,8 +1,8 @@
 {
-  "fetched_at": "2026-04-12T23:24:02.607231+00:00",
+  "fetched_at": "2026-04-12T23:41:09.111242+00:00",
   "source": "Lucas County, OH",
-  "total": 21,
-  "with_address": 10,
+  "total": 26,
+  "with_address": 14,
   "records": [
     {
       "doc_num": "",
@@ -258,27 +258,6 @@
     },
     {
       "doc_num": "",
-      "doc_type": "Code Violation",
-      "filed": "",
-      "owner": "Tree Ambassador Program",
-      "amount": 0.0,
-      "prop_address": "",
-      "prop_city": "",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "clerk_url": "",
-      "parcel_id": "",
-      "flags": [
-        "Nuisance"
-      ],
-      "score": 0
-    },
-    {
-      "doc_num": "",
       "doc_type": "Foreclosure",
       "filed": "",
       "owner": "UNKNOWN HEIRS, DEVISEES,\n\nLEGATEE, EXECUT",
@@ -439,6 +418,132 @@
       "mail_state": "OH",
       "mail_zip": "",
       "clerk_url": "https://www.toledolegalnews.com/courts/toledo_municipal/assignments-for-the-week-of-april-6-2026/article_21779f6a-3f11-45ec-addb-a9b9e476528a.html",
+      "parcel_id": "",
+      "flags": [
+        "Inherited"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Foreclosure",
+      "filed": "",
+      "owner": "The Unknown Spouse, Heirs, Devisees, Lega",
+      "amount": 0.0,
+      "prop_address": "2 Upton Ave., Toledo, OH 43613",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_6bf04586-230a-4816-8813-4aa564115271.html",
+      "parcel_id": "",
+      "flags": [
+        "Pre-foreclosure"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Foreclosure",
+      "filed": "",
+      "owner": "The Unknown Spouse, Heirs, Devisees, Lega",
+      "amount": 0.0,
+      "prop_address": "665 Stebbins St, Toledo, OH 43609",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_e45fbd96-c71e-4e62-a57b-be2ccf738752.html",
+      "parcel_id": "",
+      "flags": [
+        "Pre-foreclosure"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Foreclosure",
+      "filed": "",
+      "owner": "UNKNOWN HEIRS, DEVISEES, LEGATEE, EXECUTO",
+      "amount": 0.0,
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02458/article_4fc50404-ffac-4fd9-922e-afec5759f4d2.html",
+      "parcel_id": "",
+      "flags": [
+        "Pre-foreclosure"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Foreclosure",
+      "filed": "",
+      "owner": "Steven Joseph Meszaros, Successor to Trus",
+      "amount": 0.0,
+      "prop_address": "",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04751/article_606f23d2-088c-429f-8dd6-b6ef01ede0f5.html",
+      "parcel_id": "",
+      "flags": [
+        "Pre-foreclosure"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Foreclosure",
+      "filed": "",
+      "owner": "The Unknown Spouse, Heirs, Devisees, Lega",
+      "amount": 0.0,
+      "prop_address": "2350 Stephens Center Dr., Duluth, GA 30096",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_461e3ca8-752f-4570-9af6-aea3b9a39d13.html",
+      "parcel_id": "",
+      "flags": [
+        "Pre-foreclosure"
+      ],
+      "score": 0
+    },
+    {
+      "doc_num": "",
+      "doc_type": "Probate",
+      "filed": "",
+      "owner": "Peggy J Slawinski. Application for Attorn",
+      "amount": 0.0,
+      "prop_address": "",
+      "prop_city": "",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "clerk_url": "https://www.toledolegalnews.com/courts/probate/proabte-court-filings-received-on-4-6-2026/article_d4c99f8a-8454-4f3a-803e-a6c9f7b70c62.html",
       "parcel_id": "",
       "flags": [
         "Inherited"
