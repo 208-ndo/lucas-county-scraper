@@ -869,68 +869,189 @@ async def scrape_code_violations() -> list:
 
 
 async def scrape_tax_delinquent() -> list:
-    """Scrape tax delinquent from Treasurer + Forfeited Land + Sheriff Tax Sales."""
+    """Scrape tax delinquent: Forfeited Land (1.1MB real data) + Auditor page."""
     logging.info("Scraping tax delinquent...")
     records = []
 
-    SOURCES = [
-        "https://www.lucascountytreasurer.org/delinquent-taxes",
-        "https://www.lucascountytreasurer.org/sheriff-sales",
-        "https://co.lucas.oh.us/2949/Forfeited-Land-Sale",
+    # ── 1. Forfeited Land Sale — 1.1MB page, deepest delinquent ──
+    try:
+        html = await pw_fetch("https://co.lucas.oh.us/2949/Forfeited-Land-Sale")
+        logging.info("Forfeited land page: %d chars", len(html))
+        if len(html) > 10000:
+            soup = BeautifulSoup(html, "lxml")
+            # Try tables first
+            for table in soup.find_all("table"):
+                rows = table.find_all("tr")
+                for row in rows[1:]:
+                    cells = [clean(td.get_text()) for td in row.find_all(["td","th"])]
+                    if len(cells) < 2: continue
+                    text_row = " ".join(cells)
+                    addr_m = re.search(
+                        r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Blvd|Blvd\.|Ave|Ave\.|St|St\.|Dr|Dr\.|Rd|Rd\.|Ln|Pl|Ct|Way)\.?)"
+                        r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)?",
+                        text_row, re.I)
+                    if not addr_m: continue
+                    addr = clean(addr_m.group(1))
+                    city = clean(addr_m.group(2)).title() if addr_m.group(2) else "Toledo"
+                    # Owner is usually in first cell
+                    owner = clean(cells[0]) if cells else ""
+                    if re.match(r"^\d", owner): owner = ""  # skip if it starts with number
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", text_row)
+                    records.append(LeadRecord(
+                        owner=" ".join(w.title() for w in owner.split()) if owner else "",
+                        prop_address=addr,
+                        prop_city=city,
+                        doc_type="Tax Delinquent",
+                        amount=parse_amount(amt_m.group(1)) if amt_m else None,
+                        flags=["Tax delinquent", "Forfeited land", "Hot Stack"],
+                        hot_stack=True,
+                        score=90,
+                        clerk_url="https://co.lucas.oh.us/2949/Forfeited-Land-Sale",
+                        distress_sources=["Tax Delinquent"],
+                        distress_count=1,
+                    ))
+
+            # If no tables, try plain text parsing
+            if not records:
+                text = soup.get_text(" ")
+                for m in re.finditer(
+                    r"(\d{2,5}\s+[A-Z][A-Za-z0-9 ]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)"
+                    r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                    text, re.I):
+                    addr = clean(m.group(1))
+                    city = clean(m.group(2)).title()
+                    nearby = text[max(0,m.start()-150):m.start()]
+                    owner_m = re.search(r"([A-Z][A-Z\s,\.]{5,40})\s*$", nearby.strip())
+                    owner = " ".join(w.title() for w in clean(owner_m.group(1)).split()) if owner_m else ""
+                    records.append(LeadRecord(
+                        owner=owner,
+                        prop_address=addr,
+                        prop_city=city,
+                        doc_type="Tax Delinquent",
+                        flags=["Tax delinquent", "Forfeited land", "Hot Stack"],
+                        hot_stack=True,
+                        score=90,
+                        clerk_url="https://co.lucas.oh.us/2949/Forfeited-Land-Sale",
+                        distress_sources=["Tax Delinquent"],
+                        distress_count=1,
+                    ))
+
+            logging.info("Forfeited land: %d records", len(records))
+    except Exception as e:
+        logging.warning("Forfeited land failed: %s", e)
+
+    # ── 2. Lucas County Auditor Forfeited Land page ──
+    try:
+        html2 = await pw_fetch("https://www.lucascountyohioauditor.gov/forfeitedland")
+        if len(html2) > 10000:
+            soup2 = BeautifulSoup(html2, "lxml")
+            seen = {r.prop_address.upper() for r in records if r.prop_address}
+            for table in soup2.find_all("table"):
+                for row in table.find_all("tr")[1:]:
+                    cells = [clean(td.get_text()) for td in row.find_all(["td","th"])]
+                    if len(cells) < 2: continue
+                    text_row = " ".join(cells)
+                    addr_m = re.search(
+                        r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)",
+                        text_row, re.I)
+                    if not addr_m: continue
+                    addr = clean(addr_m.group(1))
+                    if addr.upper() in seen: continue
+                    seen.add(addr.upper())
+                    owner = clean(cells[0]) if cells else ""
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", text_row)
+                    records.append(LeadRecord(
+                        owner=" ".join(w.title() for w in owner.split()) if owner else "",
+                        prop_address=addr,
+                        prop_city="Toledo",
+                        doc_type="Tax Delinquent",
+                        amount=parse_amount(amt_m.group(1)) if amt_m else None,
+                        flags=["Tax delinquent", "Forfeited land", "Hot Stack"],
+                        hot_stack=True,
+                        score=90,
+                        clerk_url="https://www.lucascountyohioauditor.gov/forfeitedland",
+                        distress_sources=["Tax Delinquent"],
+                        distress_count=1,
+                    ))
+            logging.info("Auditor forfeited land: %d total records", len(records))
+    except Exception as e:
+        logging.debug("Auditor forfeited land: %s", e)
+
+    logging.info("Tax delinquent total: %d", len(records))
+    return records
+
+
+async def enrich_with_ohio_arcgis(records: list) -> list:
+    """
+    Enrich owner-only records (probate leads) using Ohio Statewide Parcels
+    ArcGIS REST API — fully public, no login, no paywall.
+    Queries by owner name to get property address + parcel ID.
+    """
+    # Try multiple known Ohio parcel REST service URLs
+    ARCGIS_URLS = [
+        "https://services2.arcgis.com/ziRJBiSjXODrMVP5/arcgis/rest/services/Ohio_Statewide_Parcel_Data/FeatureServer/0/query",
+        "https://geodata.ohio.gov/arcgis/rest/services/ODOT/OhioParcels/MapServer/0/query",
     ]
 
-    for url in SOURCES:
-        try:
-            html = await pw_fetch(url)
-            if len(html) < 300: continue
-            soup = BeautifulSoup(html, "lxml")
-            text = soup.get_text(" ")
+    logging.info("Ohio ArcGIS enrichment for owner-only records...")
+    enriched = 0
 
-            addr_matches = re.findall(
-                r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)"
-                r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
-                text, re.I)
-            for addr, city in addr_matches[:50]:
-                records.append(LeadRecord(
-                    prop_address=clean(addr),
-                    prop_city=clean(city).title(),
-                    doc_type="Tax Delinquent",
-                    flags=["Tax delinquent"],
-                    clerk_url=url,
-                    distress_sources=["Tax Delinquent"],
-                    distress_count=1,
-                ))
+    for rec in records:
+        if rec.prop_address or not rec.owner or len(rec.owner) < 5:
+            continue
 
-            # Follow links to sub-pages/lists
-            for a in soup.find_all("a", href=True):
-                href = a.get("href", "")
-                link_text = a.get_text().lower()
-                if any(k in link_text or k in href.lower()
-                       for k in ["delinquent", "forfeited", "tax sale", "lien"]):
-                    full_url = href if href.startswith("http") else "https://www.lucascountytreasurer.org" + href
-                    try:
-                        link_html = await pw_fetch(full_url)
-                        if len(link_html) < 300: continue
-                        link_soup = BeautifulSoup(link_html, "lxml")
-                        link_text = link_soup.get_text(" ")
-                        for m in re.finditer(
-                            r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)"
-                            r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon)",
-                            link_text, re.I):
-                            records.append(LeadRecord(
-                                prop_address=clean(m.group(1)),
-                                prop_city=clean(m.group(2)).title(),
-                                doc_type="Tax Delinquent",
-                                flags=["Tax delinquent"],
-                                clerk_url=full_url,
-                                distress_sources=["Tax Delinquent"],
-                                distress_count=1,
-                            ))
-                    except: pass
-        except Exception as e:
-            logging.warning("Tax delinquent %s failed: %s", url[:50], e)
+        # Build owner name query — use last name only for better matching
+        owner_parts = rec.owner.upper().split()
+        last_name = owner_parts[0] if owner_parts else ""
+        if len(last_name) < 3: continue
 
-    logging.info("Tax delinquent: %d", len(records))
+        for base_url in ARCGIS_URLS:
+            try:
+                import urllib.parse
+                where = f"COUNTY='LUCAS' AND OWNER1 LIKE '%{last_name}%'"
+                params = urllib.parse.urlencode({
+                    "where": where,
+                    "outFields": "OWNER1,SITEADDRESS,SITECITY,PARCELID,SITEZIP",
+                    "resultRecordCount": 5,
+                    "returnGeometry": "false",
+                    "f": "json",
+                })
+                url = f"{base_url}?{params}"
+                html = await pw_fetch(url)
+                if len(html) < 30: continue
+
+                import json as _json
+                data = _json.loads(html)
+                features = data.get("features", [])
+                if not features: continue
+
+                # Find best match — owner name similarity
+                best = None
+                best_score = 0
+                for feat in features:
+                    attrs = feat.get("attributes", {})
+                    feat_owner = str(attrs.get("OWNER1", "") or "").upper()
+                    # Score: count owner name words that match
+                    score = sum(1 for w in owner_parts if w in feat_owner)
+                    if score > best_score:
+                        best_score = score
+                        best = attrs
+
+                if best and best_score >= 1:
+                    site_addr = clean(str(best.get("SITEADDRESS", "") or ""))
+                    site_city = clean(str(best.get("SITECITY", "") or "")).title()
+                    parcel_id = clean(str(best.get("PARCELID", "") or ""))
+                    if site_addr and len(site_addr) > 5:
+                        rec.prop_address = site_addr
+                        rec.prop_city = site_city or "Toledo"
+                        if parcel_id: rec.parcel_id = parcel_id
+                        enriched += 1
+                        logging.debug("ArcGIS: %s → %s", rec.owner, site_addr)
+                        break
+            except Exception as e:
+                logging.debug("ArcGIS %s: %s", rec.owner[:20], e)
+
+    logging.info("Ohio ArcGIS enrichment: %d records enriched", enriched)
     return records
 
 def apply_distress_stacking(records: list) -> list:
@@ -1143,6 +1264,12 @@ async def main():
     logging.info("Total before enrich: %d", len(all_records))
 
     all_records = enrich_with_areis(all_records)
+
+    # Fallback enrichment: Ohio ArcGIS public API for owner-only records
+    no_addr = sum(1 for r in all_records if not r.prop_address and r.owner)
+    if no_addr > 0:
+        logging.info("Running Ohio ArcGIS enrichment for %d owner-only records...", no_addr)
+        all_records = await enrich_with_ohio_arcgis(all_records)
 
     for rec in all_records:
         rec.score = score_record(rec)
