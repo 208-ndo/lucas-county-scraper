@@ -408,12 +408,12 @@ def load_parcel_data()->Dict[str,dict]:
         # Try Socrata API — data.toledo.gov uses this format
         # First — discover what layers are available on the GIS server
         socrata_urls=[
-            # Lucas County Auditor GIS — try layer 0 (parcels with owner data)
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/0/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
-            # Try layer 1
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/1/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
-            # Try AREIS export via direct API
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer?f=json",
+            # Lucas County Auditor GIS — layers 2-8 likely have owner/address
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/2/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/3/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/4/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/5/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/6/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
         ]
         resp=None
         data_json=None
@@ -425,8 +425,21 @@ def load_parcel_data()->Dict[str,dict]:
                     try:
                         data_json=r.json()
                         if data_json:
-                            logging.info("Parcel data loaded: %s bytes, type=%s",len(r.content),type(data_json).__name__)
-                            break
+                            # Check if this layer has useful owner/address fields
+                            test_features=data_json.get("features",[]) if isinstance(data_json,dict) else data_json
+                            if test_features:
+                                test_attrs=test_features[0].get("attributes",test_features[0].get("properties",test_features[0]))
+                                keys=list(test_attrs.keys()) if isinstance(test_attrs,dict) else []
+                                has_owner=any(x in str(keys).upper() for x in ["OWNER","OWN1","NAME"])
+                                has_addr=any(x in str(keys).upper() for x in ["ADDR","ADDRESS","SITE"])
+                                logging.info("Layer fields: %s | has_owner=%s has_addr=%s",keys[:8],has_owner,has_addr)
+                                if has_owner or has_addr:
+                                    logging.info("Found useful parcel layer!")
+                                    break
+                                else:
+                                    data_json=None  # Skip this layer
+                            else:
+                                data_json=None
                     except:pass
             except Exception as pe:
                 logging.warning("Parcel URL failed: %s",str(pe)[:100])
@@ -572,16 +585,125 @@ def split_vs(caption:str)->Tuple[str,str]:
             if len(parts)==2:return clean_text(parts[0]),clean_text(parts[1])
     return "",""
 
+def _parse_tln_text(text:str,url:str,doc_type_hint:str=None)->List[LeadRecord]:
+    """Parse TLN article text into LeadRecords."""
+    records=[]
+    seen=set()
+    # Semicolon-delimited lien format
+    lien_pat=re.compile(
+        r"(LN[0-9]{4}[0-9-]+|CI[0-9]{4}[0-9-]+|TF[0-9]+)[;, ]+"
+        r"\$?([\d,\.]+)[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,80})",
+        re.IGNORECASE)
+    for m in lien_pat.finditer(text):
+        try:
+            doc_num=clean_text(m.group(1))
+            if doc_num in seen:continue
+            seen.add(doc_num)
+            try:amt=float(m.group(2).replace(",",""))
+            except:amt=None
+            if amt and amt>10000000:continue
+            plaintiff=clean_text(m.group(3))
+            owner=clean_text(m.group(4)).title()
+            addr_raw=clean_text(m.group(5))
+            if not owner or len(owner)<3:continue
+            dt=infer_doc_type(plaintiff+" "+doc_num) or doc_type_hint or "LN"
+            addr_m=re.search(r"(\d{2,5}\s+[A-Z][A-Za-z\s\.]{3,30}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL|WAY|TER|CIR)\.?)",addr_raw,re.IGNORECASE)
+            prop_address=clean_text(addr_m.group(1)).title() if addr_m else ""
+            city_m=re.search(r"(TOLEDO|MAUMEE|SYLVANIA|OREGON|PERRYSBURG|WATERVILLE|WHITEHOUSE|HOLLAND|SWANTON)",addr_raw,re.IGNORECASE)
+            prop_city=clean_text(city_m.group(0)).title() if city_m else "Toledo"
+            zip_m=re.search(r"(43\d{3})",addr_raw)
+            prop_zip=zip_m.group(1) if zip_m else ""
+            filed=try_parse_date(text[max(0,m.start()-200):m.start()+100]) or datetime.now().date().isoformat()
+            try:
+                if datetime.fromisoformat(filed).date()<(datetime.now().date()-timedelta(days=LOOKBACK_DAYS)):continue
+            except:pass
+            rec=LeadRecord(
+                doc_num=doc_num,doc_type=dt,filed=filed,cat=dt,
+                cat_label=LEAD_TYPE_MAP.get(dt,dt),
+                owner=owner,grantee=plaintiff,amount=amt,
+                prop_address=prop_address,prop_city=prop_city,prop_state="OH",prop_zip=prop_zip,
+                clerk_url=url,flags=category_flags(dt,owner),
+                distress_sources=[s for s in [classify_distress_source(dt)] if s],
+            )
+            rec=estimate_mortgage_data(rec);rec.score=score_record(rec)
+            records.append(rec)
+        except:continue
+    # VS format — "Plaintiff vs Defendant. Action for $X ... ADDRESS"
+    vs_pat=re.compile(
+        r"(CI[0-9]{4}[0-9\-]+)\s+(.{5,80}?)\s+vs\s+(.{5,60}?)\.\s+Action.{0,200}?(?:foreclosure of mtg on|property at|located at)\s+"
+        r"([0-9]{1,5}\s+[A-Z][A-Za-z\s\.]{3,30}),\s*([A-Za-z\s]+),\s*Ohio\s*([0-9]{5})?",
+        re.IGNORECASE|re.DOTALL)
+    for m in vs_pat.finditer(text):
+        try:
+            doc_num=clean_text(m.group(1))
+            if doc_num in seen:continue
+            seen.add(doc_num)
+            plaintiff=clean_text(m.group(2))
+            owner=clean_text(m.group(3)).title()
+            prop_address=clean_text(m.group(4)).title()
+            prop_city=clean_text(m.group(5)).title()
+            prop_zip=clean_text(m.group(6)) if m.group(6) else ""
+            amt_m=re.search(r"\$\s*([\d,]+(?:\.\d{2})?)",text[m.start():m.start()+200])
+            amt=parse_amount(amt_m.group(1)) if amt_m else None
+            filed=try_parse_date(text[max(0,m.start()-200):m.start()+100]) or datetime.now().date().isoformat()
+            try:
+                if datetime.fromisoformat(filed).date()<(datetime.now().date()-timedelta(days=LOOKBACK_DAYS)):continue
+            except:pass
+            rec=LeadRecord(
+                doc_num=doc_num,doc_type="NOFC",filed=filed,cat="NOFC",
+                cat_label="Pre-foreclosure",
+                owner=owner,grantee=plaintiff,amount=amt,
+                prop_address=prop_address,prop_city=prop_city,prop_state="OH",prop_zip=prop_zip,
+                clerk_url=url,
+                flags=["Pre-foreclosure","Foreclosure"],
+                distress_sources=["foreclosure","lis_pendens"],
+            )
+            rec=estimate_mortgage_data(rec);rec.score=score_record(rec)
+            records.append(rec)
+        except:continue
+    return records
+
+
 async def scrape_tln_page(url:str,doc_type_hint:str=None)->List[LeadRecord]:
-    """Scrape a Toledo Legal News listing page for leads using Playwright."""
+    """
+    Scrape a Toledo Legal News listing page.
+    TLN has two types of pages:
+    1. INDEX pages — list of article links (need to follow links)
+    2. ARTICLE pages — actual data with case numbers
+    """
     records:List[LeadRecord]=[]
     try:
         html=await pw_get_html(url)
         if not html:return records
         soup=BeautifulSoup(html,"lxml")
         save_debug_text(f"tln_{doc_type_hint or 'page'}.html",html[:8000])
-        text_preview=soup.get_text(" ")[:500]
-        logging.info("TLN page %s: %s chars, preview: %s",url[-40:],len(html),text_preview[:100])
+        text=soup.get_text(" ")
+        logging.info("TLN page %s: %s chars",url[-40:],len(html))
+
+        # Check if this is an index page (has article links) — follow them
+        article_links=[]
+        for a in soup.select("a[href]"):
+            href=clean_text(a.get("href",""))
+            if not href or any(x in href for x in ["facebook","twitter","mailto","#","utm_","signup","login","wa.me"]):continue
+            if "article_" in href or "article-" in href:
+                full=href if href.startswith("http") else requests.compat.urljoin(TLN_BASE,href)
+                if "toledolegalnews.com" in full and full not in article_links:
+                    article_links.append(full)
+
+        if article_links:
+            logging.info("TLN index page found %s articles at %s",len(article_links),url[-50:])
+            for art_url in article_links[:20]:  # limit to 20 most recent
+                try:
+                    art_html=await pw_get_html(art_url,wait_ms=1500)
+                    if not art_html or len(art_html)<500:continue
+                    art_soup=BeautifulSoup(art_html,"lxml")
+                    art_text=art_soup.get_text(" ")
+                    recs=_parse_tln_text(art_text,art_url,doc_type_hint)
+                    records.extend(recs)
+                    if recs:logging.info("TLN article %s: %s records",art_url[-50:],len(recs))
+                except Exception as ae:
+                    logging.warning("TLN article %s: %s",art_url[-40:],ae)
+            return records
         text=soup.get_text(" ")
 
         # Try table rows
@@ -751,7 +873,7 @@ async def scrape_tln_common_pleas()->List[LeadRecord]:
         links=[]
         for a in soup.select("a[href]"):
             href=clean_text(a.get("href",""))
-            if not href or any(x in href for x in ["facebook","twitter","mailto","#","utm_"]):continue
+            if not href or any(x in href for x in ["facebook","twitter","mailto","#","utm_","signup","login","wa.me","whatsapp"]):continue
             if any(x in href for x in ["article_","filings-received","common-pleas","common_pleas"]):
                 full=href if href.startswith("http") else requests.compat.urljoin(TLN_BASE,href)
                 if "toledolegalnews.com" in full and full not in links:
