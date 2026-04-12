@@ -1,27 +1,28 @@
 [
   {
-    "owner": "",
-    "prop_address": "247 Gradolph St",
-    "prop_city": "Toledo",
+    "owner": "Mildred K Kane",
+    "prop_address": "",
+    "prop_city": "",
     "prop_zip": "",
     "mail_address": "",
     "mail_city": "",
     "mail_state": "",
     "mail_zip": "",
-    "doc_type": "Tax Delinquent",
+    "doc_type": "Probate",
     "filed": "",
     "amount": null,
     "doc_num": "",
-    "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/",
+    "clerk_url": "https://www.toledolegalnews.com/courts/probate/probate-court-filings-received-on-4-8-2026/article_122f8c8c-c803-499d-8a9c-25cd248e6513.html",
     "parcel_id": "",
     "luc": "",
     "acres": "",
     "est_market_value": null,
     "assessed_value": null,
     "last_sale_price": null,
-    "score": 35,
+    "score": 55,
     "flags": [
-      "Tax delinquent"
+      "Probate",
+      "Inherited"
     ],
     "distress_sources": [],
     "distress_count": 0,
@@ -29,7 +30,7 @@
     "is_absentee": false,
     "is_out_of_state": false,
     "is_vacant_land": false,
-    "is_inherited": false,
+    "is_inherited": true,
     "phone": "",
     "tags": []
   }
