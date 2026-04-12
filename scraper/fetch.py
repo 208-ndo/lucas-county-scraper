@@ -1,669 +1,939 @@
 """
-DROP-IN REPLACEMENT for Lucas County parcel loading in fetch.py
-================================================================
-Replace your existing `load_lucas_parcel_data()` function AND
-`build_parcel_indexes()` function with the code below.
+Toledo / Lucas County — Motivated Seller Intelligence
+=====================================================
+Sources:
+  1. Toledo Legal News — Common Pleas (lis pendens, foreclosure, liens)
+  2. Toledo Legal News — Probate
+  3. Toledo Legal News — Domestic (divorce)
+  4. Toledo Legal News — Foreclosure notices
+  5. Lucas County Sheriff Sale Auction
+  6. Lucas County Foreclosure Search
+  7. Lucas County Treasurer — Tax Delinquent
+  8. Lucas County AREIS — owner/address enrichment (icare.co.lucas.oh.us)
 
-The old code tried to pull owner/address from ArcGIS layers that
-only contain geometry (AREA_NUM, BLOCK_NUM, ACREAGE) — no owner,
-no address. That's why parcel_data: 0 addresses indexed.
-
-This new approach uses the Lucas County AREIS iasWorld public
-search at icare.co.lucas.oh.us to look up each lead by address
-and get owner name, mailing address, land use code, and value.
-
-HOW TO USE:
-1. Find the old load_lucas_parcel_data() in your fetch.py and
-   replace the entire function with the one below.
-2. Find the old build_parcel_indexes() and replace it too.
-3. In your main() function, change the call from:
-      parcel_index = load_lucas_parcel_data()
-   to:
-      parcel_index = {}   # populated lazily by enrich_record_areis()
-   Then after scraping, call:
-      all_records = enrich_all_records_areis(all_records)
+Output:
+  data/records.json, data/hot_stack.json, data/sheriff_sales.json
+  data/probate.json, data/tax_delinquent.json, data/foreclosure.json
+  data/liens.json, data/absentee.json, data/out_of_state.json
+  data/divorces.json, data/bankruptcy.json, data/code_violations.json
+  data/ghl_export.csv, data/records.enriched.csv
 """
 
-import re
-import time
-import logging
-import asyncio
+from __future__ import annotations
+import asyncio, json, logging, re, time, csv
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
-
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+import warnings
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONSTANTS
-# ─────────────────────────────────────────────────────────────────────────────
+try:
+    from playwright.async_api import async_playwright
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+LOOKBACK_DAYS   = 90
+SOURCE_NAME     = "Lucas County / Toledo"
+DATA_DIR        = Path("data")
+DASHBOARD_DIR   = Path("dashboard")
+
+TLN_BASE        = "https://www.toledolegalnews.com"
+TLN_CP          = f"{TLN_BASE}/courts/common_pleas/"
+TLN_PROBATE     = f"{TLN_BASE}/courts/probate/"
+TLN_DOMESTIC    = f"{TLN_BASE}/courts/domestic_court/"
+TLN_FORECLOSURE = f"{TLN_BASE}/legal_notices/foreclosures/"
+SHERIFF_CAL     = "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=USER&zmethod=CALENDAR"
+TREASURER_URL   = "https://www.lucascountytreasurer.org/delinquent-taxes"
 AREIS_BASE      = "https://icare.co.lucas.oh.us/lucascare"
-AREIS_ADDR_URL  = f"{AREIS_BASE}/search/commonsearch.aspx?mode=address"
 AREIS_OWNER_URL = f"{AREIS_BASE}/search/commonsearch.aspx?mode=owner"
+AREIS_ADDR_URL  = f"{AREIS_BASE}/search/commonsearch.aspx?mode=address"
 AREIS_PARID_URL = f"{AREIS_BASE}/search/commonsearch.aspx?mode=parid"
-AREIS_DETAIL    = f"{AREIS_BASE}/search/commonsearch.aspx?mode=detail"
 
-AREIS_HEADERS = {
+HOT_STACK_MIN_SCORE = 80
+HOT_STACK_MIN_SOURCES = 2
+
+VACANT_LUCS = {
+    "400","401","402","403","404","405","406","407","408","409",
+    "500","501","502","503","504","505","506","510","511","512",
+    "550","551","552","553","554","555",
+    "700","701","702","703","704","705",
+    "800","801","802","803","880","881",
+}
+
+HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Referer": AREIS_BASE,
+    )
 }
 
-# Land use codes that indicate VACANT land (no structure)
-VACANT_LAND_LUCS = {
-    "400", "401", "402", "403", "404", "405", "406", "407", "408", "409",
-    "500", "501", "502", "503", "504", "505", "506", "510", "511", "512",
-    "550", "551", "552", "553", "554", "555",
-    "700", "701", "702", "703", "704", "705",
-    "800", "801", "802", "803", "880", "881",
-}
+# ── DATA MODEL ────────────────────────────────────────────────────────────────
+@dataclass
+class LeadRecord:
+    owner:           str = ""
+    prop_address:    str = ""
+    prop_city:       str = ""
+    prop_zip:        str = ""
+    mail_address:    str = ""
+    mail_city:       str = ""
+    mail_state:      str = ""
+    mail_zip:        str = ""
+    doc_type:        str = ""
+    filed:           str = ""
+    amount:          Optional[float] = None
+    doc_num:         str = ""
+    clerk_url:       str = ""
+    parcel_id:       str = ""
+    luc:             str = ""
+    acres:           str = ""
+    est_market_value: Optional[float] = None
+    assessed_value:  Optional[float] = None
+    last_sale_price: Optional[float] = None
+    score:           int = 0
+    flags:           list = field(default_factory=list)
+    distress_sources: list = field(default_factory=list)
+    distress_count:  int = 0
+    hot_stack:       bool = False
+    is_absentee:     bool = False
+    is_out_of_state: bool = False
+    is_vacant_land:  bool = False
+    is_inherited:    bool = False
+    phone:           str = ""
+    tags:            list = field(default_factory=list)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SESSION  (shared across all lookups)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────────
+def clean(s) -> str:
+    if s is None: return ""
+    return " ".join(str(s).split()).strip()
+
+def normalize_state(s: str) -> str:
+    s = clean(s).upper()
+    if len(s) == 2 and s.isalpha(): return s
+    m = {"OHIO":"OH","MICHIGAN":"MI","INDIANA":"IN","FLORIDA":"FL",
+         "TEXAS":"TX","GEORGIA":"GA","CALIFORNIA":"CA"}
+    return m.get(s, "")
+
+def parse_amount(s: str) -> Optional[float]:
+    if not s: return None
+    s = re.sub(r"[^\d.]", "", s)
+    try: return float(s) if s else None
+    except: return None
+
+def parse_date(s: str) -> str:
+    if not s: return ""
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
+        try: return datetime.strptime(clean(s), fmt).strftime("%Y-%m-%d")
+        except: pass
+    return clean(s)
+
+def is_within_lookback(date_str: str) -> bool:
+    if not date_str: return True
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return d >= datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    except: return True
+
+def ensure_dirs():
+    DATA_DIR.mkdir(exist_ok=True)
+    DASHBOARD_DIR.mkdir(exist_ok=True)
+
+def log_setup():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S,%f"[:-3],
+    )
+
+def write_json(path: Path, data):
+    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+def score_record(r: LeadRecord) -> int:
+    s = 0
+    dt = r.doc_type.lower()
+    if "sheriff" in dt:          s += 50
+    if "pre-foreclosure" in dt or "lis pendens" in dt: s += 40
+    if "foreclosure" in dt:      s += 40
+    if "tax" in dt:              s += 35
+    if "probate" in dt:          s += 30
+    if "lien" in dt:             s += 20
+    if "divorce" in dt:          s += 20
+    if r.is_absentee:            s += 15
+    if r.is_out_of_state:        s += 20
+    if r.is_vacant_land:         s += 10
+    if r.is_inherited:           s += 25
+    if r.distress_count >= 2:    s += 20
+    if r.distress_count >= 3:    s += 15
+    if r.amount and r.amount > 0: s += 5
+    return min(s, 100)
+
+# ── PLAYWRIGHT FETCH ──────────────────────────────────────────────────────────
+async def pw_fetch(url: str, timeout: int = 30000) -> str:
+    if not HAS_PLAYWRIGHT:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            return r.text
+        except Exception as e:
+            logging.warning("requests fetch failed %s: %s", url[:80], e)
+            return ""
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            content = await page.content()
+            await browser.close()
+            logging.info("pw_fetch %d chars from %s", len(content), url[:80])
+            return content
+    except Exception as e:
+        logging.warning("pw_fetch failed %s: %s", url[:80], e)
+        return ""
+
+# ── AREIS ENRICHMENT ──────────────────────────────────────────────────────────
 _areis_session: Optional[requests.Session] = None
 
-def _get_areis_session() -> requests.Session:
+def get_areis_session() -> requests.Session:
     global _areis_session
     if _areis_session is None:
         _areis_session = requests.Session()
-        _areis_session.headers.update(AREIS_HEADERS)
-        # Warm up — grab homepage to get any cookies/viewstate
+        _areis_session.headers.update(HEADERS)
         try:
-            _areis_session.get(AREIS_BASE + "/main/homepage.aspx", timeout=15)
-        except Exception:
-            pass
+            _areis_session.get(f"{AREIS_BASE}/main/homepage.aspx", timeout=15)
+        except: pass
     return _areis_session
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-def _clean(s) -> str:
-    if s is None:
-        return ""
-    return " ".join(str(s).split()).strip()
-
-
-def _normalize_state(s: str) -> str:
-    """Return 2-letter state abbreviation or empty string."""
-    s = _clean(s).upper()
-    if len(s) == 2 and s.isalpha():
-        return s
-    state_map = {
-        "OHIO": "OH", "MICHIGAN": "MI", "INDIANA": "IN",
-        "FLORIDA": "FL", "TEXAS": "TX", "GEORGIA": "GA",
-        "CALIFORNIA": "CA", "PENNSYLVANIA": "PA", "NEW YORK": "NY",
-    }
-    return state_map.get(s, "")
-
-
-def _parse_street_num(address: str) -> tuple:
-    """Split '2175 Aberdeen' into ('2175', 'ABERDEEN')."""
-    address = _clean(address).upper()
-    m = re.match(r"^(\d+[A-Z]?)\s+(.*)", address)
-    if m:
-        return m.group(1), m.group(2).strip()
-    return "", address
-
-
-def _is_absentee(prop_addr: str, mail_addr: str, mail_city: str, mail_state: str) -> bool:
-    """
-    True if mailing address is meaningfully different from property address.
-    Handles PO Boxes, out-of-state, and different street addresses.
-    """
-    if not mail_addr:
-        return False
-    mail_up = _clean(mail_addr).upper()
-    prop_up = _clean(prop_addr).upper()
-
-    # PO Box is always absentee
-    if mail_up.startswith("PO BOX") or mail_up.startswith("P.O. BOX"):
-        return True
-
-    # Out of state mailing = absentee
-    if mail_state and mail_state.upper() not in ("OH", ""):
-        return True
-
-    # Different city = absentee (owner in Maumee but property in Toledo, etc.)
-    if mail_city and mail_city.upper() not in ("TOLEDO", ""):
-        prop_city_guess = "TOLEDO"  # most Lucas County props are Toledo
-        if mail_city.upper() != prop_city_guess:
-            return True
-
-    # Compare street numbers
-    prop_num, prop_street = _parse_street_num(prop_up)
-    mail_num, mail_street = _parse_street_num(mail_up)
-
-    if prop_num and mail_num and prop_num != mail_num:
-        return True
-    if prop_street and mail_street:
-        # Normalize common abbreviations
-        for abbr, full in [("ST", "STREET"), ("AVE", "AVENUE"), ("DR", "DRIVE"),
-                           ("RD", "ROAD"), ("LN", "LANE"), ("BLVD", "BOULEVARD")]:
-            prop_street = prop_street.replace(f" {abbr}", f" {full}")
-            mail_street = mail_street.replace(f" {abbr}", f" {full}")
-        if prop_street != mail_street:
-            return True
-
-    return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AREIS LOOKUP  — by owner name (for records that have owner but no address)
-# ─────────────────────────────────────────────────────────────────────────────
-def _areis_lookup_by_owner(owner_name: str) -> list:
-    """
-    Search AREIS by owner name. Returns list of result dicts.
-    Each dict has: parcel_id, prop_address, prop_city, owner_name,
-                   mail_address, mail_city, mail_state, mail_zip,
-                   luc, acres, est_market_value
-    """
-    if not owner_name or len(owner_name) < 3:
-        return []
-
-    sess = _get_areis_session()
-
-    # AREIS owner search uses a POST with owner name
-    # Last name goes in 'ownerlast', first in 'ownerfirst'
-    # For "COMSTOCK KELLIE ANN" style (all caps, last first), split on first space
-    parts = owner_name.upper().strip().split()
-    last = parts[0] if parts else owner_name
-    first = parts[1] if len(parts) > 1 else ""
-
+def areis_search_owner(last: str, first: str = "") -> list:
+    sess = get_areis_session()
     try:
-        resp = sess.post(
+        r = sess.get(
             AREIS_OWNER_URL,
-            data={
-                "ownerlast": last,
-                "ownerfirst": first,
-                "searchType": "owner",
-                "btnSearch": "Search",
-            },
-            timeout=20,
+            params={"name": f"{last} {first}".strip(), "searchType": "3"},
+            timeout=20
         )
-        return _parse_areis_results(resp.text)
+        return areis_parse_results(r.text)
     except Exception as e:
-        logging.debug("AREIS owner lookup failed for %s: %s", owner_name, e)
+        logging.debug("AREIS owner search failed: %s", e)
         return []
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AREIS LOOKUP  — by address
-# ─────────────────────────────────────────────────────────────────────────────
-def _areis_lookup_by_address(street_num: str, street_name: str) -> list:
-    """
-    Search AREIS by property address. Returns list of result dicts.
-    """
-    if not street_num or not street_name:
-        return []
-
-    sess = _get_areis_session()
+def areis_search_address(stno: str, stname: str) -> list:
+    sess = get_areis_session()
     try:
-        resp = sess.post(
+        r = sess.get(
             AREIS_ADDR_URL,
-            data={
-                "stno": street_num,
-                "stname": street_name,
-                "searchType": "address",
-                "btnSearch": "Search",
-            },
-            timeout=20,
+            params={"stno": stno, "stname": stname, "searchType": "1"},
+            timeout=20
         )
-        return _parse_areis_results(resp.text)
+        return areis_parse_results(r.text)
     except Exception as e:
-        logging.debug("AREIS addr lookup failed %s %s: %s", street_num, street_name, e)
+        logging.debug("AREIS addr search failed: %s", e)
         return []
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AREIS RESULT PARSER
-# ─────────────────────────────────────────────────────────────────────────────
-def _parse_areis_results(html: str) -> list:
-    """
-    Parse the AREIS search results table.
-    Returns list of dicts with parcel data.
-    """
+def areis_parse_results(html: str) -> list:
     results = []
-    if not html or len(html) < 200:
-        return results
-
+    if not html or len(html) < 300: return results
     soup = BeautifulSoup(html, "lxml")
-
-    # Results are in a table — find rows with parcel links
     for row in soup.select("table tr"):
-        cells = row.find_all(["td", "th"])
-        if len(cells) < 4:
-            continue
-        texts = [_clean(c.get_text()) for c in cells]
-
-        # Skip header rows
-        if any(t.lower() in ("parcel id", "owner", "address", "land use") for t in texts):
-            continue
-
-        # A valid result row has a parcel ID (digits + dashes)
-        parcel_id = ""
+        cells = row.find_all(["td","th"])
+        if len(cells) < 3: continue
+        texts = [clean(c.get_text()) for c in cells]
+        # Find parcel ID pattern
+        parid = ""
         for t in texts:
             if re.match(r"^\d{2}-\d{6}-\d{3}-\d{3}$", t):
-                parcel_id = t
-                break
-            # Also match just digits
-            if re.match(r"^\d{14,17}$", t.replace("-", "")):
-                parcel_id = t
-                break
-
-        if not parcel_id:
-            continue
-
-        # Extract the link to detail page
-        detail_link = None
-        for a in row.find_all("a", href=True):
-            if "detail" in a["href"].lower() or "parid" in a["href"].lower():
-                detail_link = a["href"]
-                break
-
-        # Build basic record from row cells
-        record = {
-            "parcel_id": parcel_id,
-            "prop_address": "",
-            "prop_city": "",
-            "owner_name": "",
-            "mail_address": "",
-            "mail_city": "",
-            "mail_state": "OH",
-            "mail_zip": "",
-            "luc": "",
-            "acres": "",
-            "est_market_value": None,
-            "detail_url": detail_link,
-        }
-
-        # Try to map cells: typical order is
-        # ParcelID | Owner | Address | LandUse | TotalValue
-        if len(texts) >= 2:
-            record["owner_name"] = texts[1]
-        if len(texts) >= 3:
-            record["prop_address"] = texts[2]
-        if len(texts) >= 4:
-            record["luc"] = texts[3]
-        if len(texts) >= 5:
-            val_str = texts[4].replace("$", "").replace(",", "").strip()
-            try:
-                record["est_market_value"] = float(val_str)
-            except ValueError:
-                pass
-
-        results.append(record)
-
+                parid = t; break
+            if re.match(r"^\d{15,17}$", t.replace("-","")):
+                parid = t; break
+        if not parid: continue
+        results.append({
+            "parcel_id": parid,
+            "owner_name": texts[1] if len(texts) > 1 else "",
+            "prop_address": texts[2] if len(texts) > 2 else "",
+            "luc": texts[3] if len(texts) > 3 else "",
+            "total_value": texts[4] if len(texts) > 4 else "",
+        })
     return results
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AREIS DETAIL PAGE — gets mailing address (not in search results)
-# ─────────────────────────────────────────────────────────────────────────────
-def _areis_get_detail(parcel_id: str) -> dict:
-    """
-    Fetch the AREIS detail page for a parcel to get mailing address,
-    exact owner name, land use code, and assessed value.
-    """
-    sess = _get_areis_session()
+def areis_get_detail(parcel_id: str) -> dict:
+    sess = get_areis_session()
     detail = {
-        "owner_name": "",
-        "mail_address": "",
-        "mail_city": "",
-        "mail_state": "OH",
-        "mail_zip": "",
-        "prop_address": "",
-        "prop_city": "Toledo",
-        "luc": "",
-        "acres": "",
-        "est_market_value": None,
-        "assessed_value": None,
+        "owner_name":"","mail_address":"","mail_city":"",
+        "mail_state":"OH","mail_zip":"","prop_address":"",
+        "prop_city":"Toledo","luc":"","acres":"",
+        "est_market_value":None,"assessed_value":None,
     }
-
     try:
-        resp = sess.get(
-            f"{AREIS_BASE}/search/commonsearch.aspx?mode=detail&parid={parcel_id}",
-            timeout=20,
+        r = sess.get(
+            f"{AREIS_BASE}/search/commonsearch.aspx",
+            params={"mode":"detail","parid":parcel_id},
+            timeout=20
         )
-        html = resp.text
-        if not html or len(html) < 500:
-            return detail
-
+        html = r.text
+        if not html or len(html) < 500: return detail
         soup = BeautifulSoup(html, "lxml")
 
-        # AREIS detail page has labeled rows like:
-        # "Owner Name:" | "SMITH JOHN"
-        # "Mailing Address:" | "123 MAIN ST"
-        # "Mail City:" | "TOLEDO"
-        # "Property Address:" | "456 OAK AVE"
-        # "Land Use:" | "510 - Single Family"
-        # "Assessed Value:" | "$45,000"
-        # "Est. Market Value:" | "$128,571"
-
-        label_map = {
-            "owner name":        "owner_name",
-            "owner":             "owner_name",
-            "mailing address":   "mail_address",
-            "mail address":      "mail_address",
-            "mail city":         "mail_city",
-            "mailing city":      "mail_city",
-            "mail state":        "mail_state",
-            "mailing state":     "mail_state",
-            "mail zip":          "mail_zip",
-            "mailing zip":       "mail_zip",
-            "property address":  "prop_address",
-            "prop address":      "prop_address",
-            "property city":     "prop_city",
-            "land use":          "luc",
-            "land use code":     "luc",
-            "acreage":           "acres",
-            "acres":             "acres",
+        # Label → value mapping for AREIS detail page
+        lmap = {
+            "owner name":"owner_name","owner":"owner_name",
+            "mailing address":"mail_address","mail address":"mail_address",
+            "mail city":"mail_city","mailing city":"mail_city",
+            "mail state":"mail_state","mailing state":"mail_state",
+            "mail zip":"mail_zip","mailing zip":"mail_zip",
+            "property address":"prop_address","location address":"prop_address",
+            "city":"prop_city","property city":"prop_city",
+            "land use":"luc","land use code":"luc",
+            "acreage":"acres","acres":"acres",
         }
-
-        # Scan all table rows for label | value pairs
         for row in soup.find_all("tr"):
-            cells = row.find_all(["td", "th"])
+            cells = row.find_all(["td","th"])
             if len(cells) >= 2:
-                label = _clean(cells[0].get_text()).lower().rstrip(":")
-                value = _clean(cells[1].get_text())
-                if label in label_map and value:
-                    detail[label_map[label]] = value
+                label = clean(cells[0].get_text()).lower().rstrip(":")
+                value = clean(cells[1].get_text())
+                if label in lmap and value:
+                    detail[lmap[label]] = value
 
-        # Also try to find value in span/div with specific IDs or classes
-        # AREIS uses asp.net controls with predictable IDs
-        for field_id, key in [
-            ("_lblOwner",         "owner_name"),
-            ("_lblMailAddress",   "mail_address"),
-            ("_lblMailCity",      "mail_city"),
-            ("_lblMailState",     "mail_state"),
-            ("_lblMailZip",       "mail_zip"),
-            ("_lblPropAddress",   "prop_address"),
-            ("_lblLandUse",       "luc"),
-            ("_lblAcreage",       "acres"),
-        ]:
-            el = soup.find(id=lambda x: x and field_id in x)
-            if el:
-                val = _clean(el.get_text())
-                if val:
-                    detail[key] = val
-
-        # Parse assessed / market values from the page text
+        # Parse values from text
         text = soup.get_text(" ")
-        for pattern, key in [
-            (r"(?:Est\.?\s*Market\s*Value|EMV)[:\s]+\$?([\d,]+)", "est_market_value"),
-            (r"(?:Assessed\s*Value|Total\s*Assessed)[:\s]+\$?([\d,]+)", "assessed_value"),
-            (r"(?:Total\s*Value|Market\s*Value)[:\s]+\$?([\d,]+)", "est_market_value"),
+        for pat, key in [
+            (r"(?:Est\.?\s*Market\s*Value|Market Value)[:\s]+\$?([\d,]+)", "est_market_value"),
+            (r"(?:Total\s*Assessed|Assessed\s*Value)[:\s]+\$?([\d,]+)", "assessed_value"),
+            (r"(?:Total Value|Appraised)[:\s]+\$?([\d,]+)", "est_market_value"),
         ]:
-            m = re.search(pattern, text, re.IGNORECASE)
+            m = re.search(pat, text, re.IGNORECASE)
             if m:
                 try:
-                    v = float(m.group(1).replace(",", ""))
-                    if v > 0:
-                        detail[key] = v
-                except ValueError:
-                    pass
+                    v = float(m.group(1).replace(",",""))
+                    if v > 0: detail[key] = v
+                except: pass
 
-        # If we got assessed but not market, estimate (Ohio = 35% ratio)
         if detail["assessed_value"] and not detail["est_market_value"]:
             detail["est_market_value"] = round(detail["assessed_value"] / 0.35)
 
-        # Normalize state
-        detail["mail_state"] = _normalize_state(detail["mail_state"]) or "OH"
+        detail["mail_state"] = normalize_state(detail["mail_state"]) or "OH"
 
     except Exception as e:
-        logging.debug("AREIS detail failed for %s: %s", parcel_id, e)
-
+        logging.debug("AREIS detail failed %s: %s", parcel_id, e)
     return detail
 
+def is_absentee(prop_addr: str, mail_addr: str, mail_city: str, mail_state: str) -> bool:
+    if not mail_addr: return False
+    mu = clean(mail_addr).upper()
+    pu = clean(prop_addr).upper()
+    if mu.startswith("PO BOX") or mu.startswith("P O BOX"): return True
+    if mail_state and mail_state not in ("OH","","0","3"): return True
+    if mail_city and mail_city.upper() not in ("TOLEDO","MAUMEE","SYLVANIA","OREGON",
+                                                 "PERRYSBURG","WATERVILLE",""):
+        return True
+    m1 = re.match(r"^(\d+)\s", pu)
+    m2 = re.match(r"^(\d+)\s", mu)
+    if m1 and m2 and m1.group(1) != m2.group(1): return True
+    return False
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN ENRICHMENT FUNCTION — call this after scraping all records
-# ─────────────────────────────────────────────────────────────────────────────
-def enrich_all_records_areis(records: list, max_workers: int = 4) -> list:
-    """
-    Enrich all lead records with AREIS parcel data.
-    For each record:
-      1. Parse street number + name from record's prop_address
-      2. Search AREIS to confirm/get owner name
-      3. Fetch detail page for mailing address
-      4. Set is_absentee, is_out_of_state, is_vacant_land flags
+def parse_street(addr: str):
+    addr = clean(addr)
+    m = re.match(r"^(\d+[A-Za-z]?)\s+(.*)", addr)
+    if m: return m.group(1), m.group(2).strip()
+    return "", addr
 
-    Records are updated IN PLACE and returned.
-    Uses a small delay between requests to be polite.
-    """
-    total = len(records)
-    logging.info("AREIS enrichment: %d records to process", total)
-
-    enriched = 0
-    absentee = 0
-    oos = 0
-    vacant = 0
-
-    # Cache to avoid re-fetching same parcel
-    cache: dict = {}
+def enrich_with_areis(records: list) -> list:
+    logging.info("Starting AREIS enrichment for %d records...", len(records))
+    cache = {}
+    enriched = absentee_ct = oos_ct = vacant_ct = 0
 
     for i, rec in enumerate(records):
-        if i % 50 == 0:
-            logging.info("AREIS enrichment: %d/%d done | absentee=%d oos=%d vacant=%d",
-                         i, total, absentee, oos, vacant)
+        if i % 100 == 0 and i > 0:
+            logging.info("AREIS enrichment: %d/%d | absentee=%d oos=%d vacant=%d",
+                         i, len(records), absentee_ct, oos_ct, vacant_ct)
 
-        # Get address from record (try multiple field names)
-        prop_addr = _clean(
-            getattr(rec, "prop_address", None)
-            or rec.get("prop_address", "") if isinstance(rec, dict) else ""
-        )
+        prop_addr = clean(rec.prop_address)
+        owner = clean(rec.owner)
+        stno, stname = parse_street(prop_addr)
 
-        owner = _clean(
-            getattr(rec, "owner", None)
-            or rec.get("owner", "") if isinstance(rec, dict) else ""
-        )
+        cache_key = f"{stno}|{stname}" if stno else f"own|{owner[:25]}"
 
-        if not prop_addr and not owner:
-            continue
-
-        # Parse address into number + street
-        street_num, street_name = _parse_street_num(prop_addr)
-
-        # Check cache first (keyed by address)
-        cache_key = f"{street_num}|{street_name}" if street_num else f"owner|{owner[:30]}"
-        if cache_key in cache:
-            detail = cache[cache_key]
-        else:
-            # Search by address first, fall back to owner name
-            detail = None
+        if cache_key not in cache:
             parcel_id = None
+            detail = {}
 
-            if street_num and street_name:
-                results = _areis_lookup_by_address(street_num, street_name)
+            # Try address search first
+            if stno and stname:
+                results = areis_search_address(stno, stname)
                 if results:
-                    parcel_id = results[0].get("parcel_id")
+                    parcel_id = results[0]["parcel_id"]
 
+            # Fallback: owner name search
             if not parcel_id and owner:
-                results = _areis_lookup_by_owner(owner)
-                if results:
-                    # Try to match by address
-                    for r in results:
-                        if street_num and street_num in _clean(r.get("prop_address", "")):
-                            parcel_id = r.get("parcel_id")
-                            break
-                    if not parcel_id and results:
-                        parcel_id = results[0].get("parcel_id")
+                parts = owner.upper().split()
+                last = parts[0] if parts else owner
+                results = areis_search_owner(last)
+                for r in results:
+                    if stno and stno in clean(r.get("prop_address","")):
+                        parcel_id = r["parcel_id"]
+                        break
+                if not parcel_id and results:
+                    parcel_id = results[0]["parcel_id"]
 
             if parcel_id:
-                detail = _areis_get_detail(parcel_id)
-                time.sleep(0.4)  # polite delay
-            else:
-                detail = {}
+                detail = areis_get_detail(parcel_id)
+                detail["parcel_id"] = parcel_id
+                time.sleep(0.35)
 
             cache[cache_key] = detail
 
+        detail = cache[cache_key]
         if not detail:
             continue
 
-        # Apply enrichment to record
-        def _set(field, value):
-            if isinstance(rec, dict):
-                if not rec.get(field):
-                    rec[field] = value
-            else:
-                if not getattr(rec, field, None):
-                    try:
-                        setattr(rec, field, value)
-                    except AttributeError:
-                        pass
-
-        def _get(field):
-            if isinstance(rec, dict):
-                return rec.get(field, "")
-            return getattr(rec, field, "") or ""
-
-        if detail.get("owner_name"):
-            _set("owner", detail["owner_name"])
-        if detail.get("prop_address"):
-            _set("prop_address", detail["prop_address"])
+        # Apply to record
+        if detail.get("owner_name") and not rec.owner:
+            rec.owner = detail["owner_name"]
+        if detail.get("prop_address") and not rec.prop_address:
+            rec.prop_address = detail["prop_address"]
         if detail.get("prop_city"):
-            _set("prop_city", detail["prop_city"])
+            rec.prop_city = detail["prop_city"]
         if detail.get("mail_address"):
-            _set("mail_address", detail["mail_address"])
-        if detail.get("mail_city"):
-            _set("mail_city", detail["mail_city"])
-        if detail.get("mail_state"):
-            _set("mail_state", detail["mail_state"])
-        if detail.get("mail_zip"):
-            _set("mail_zip", detail["mail_zip"])
+            rec.mail_address = detail["mail_address"]
+            rec.mail_city    = detail.get("mail_city","")
+            rec.mail_state   = detail.get("mail_state","OH")
+            rec.mail_zip     = detail.get("mail_zip","")
         if detail.get("luc"):
-            _set("luc", detail["luc"])
+            rec.luc = detail["luc"]
         if detail.get("acres"):
-            _set("acres", detail["acres"])
+            rec.acres = detail["acres"]
         if detail.get("est_market_value"):
-            _set("est_market_value", detail["est_market_value"])
+            rec.est_market_value = detail["est_market_value"]
         if detail.get("assessed_value"):
-            _set("assessed_value", detail["assessed_value"])
+            rec.assessed_value = detail["assessed_value"]
         if detail.get("parcel_id"):
-            _set("parcel_id", detail.get("parcel_id", ""))
+            rec.parcel_id = detail["parcel_id"]
 
         enriched += 1
 
-        # Now apply flags
-        mail_addr = _get("mail_address")
-        mail_city = _get("mail_city")
-        mail_state = _get("mail_state")
-        luc = _get("luc").split("-")[0].strip() if _get("luc") else ""
+        # Flags
+        mail_s = clean(rec.mail_state)
+        mail_a = clean(rec.mail_address)
+        mail_c = clean(rec.mail_city)
 
-        # Absentee owner
-        is_absentee = _is_absentee(prop_addr, mail_addr, mail_city, mail_state)
-        if isinstance(rec, dict):
-            rec["is_absentee"] = is_absentee
-        else:
-            try:
-                rec.is_absentee = is_absentee
-            except AttributeError:
-                pass
+        if is_absentee(prop_addr, mail_a, mail_c, mail_s):
+            rec.is_absentee = True
+            if "Absentee owner" not in rec.flags:
+                rec.flags.append("Absentee owner")
+            absentee_ct += 1
 
-        if is_absentee:
-            absentee += 1
-            flags = _get("flags") or []
-            if isinstance(flags, list) and "Absentee owner" not in flags:
-                flags.append("Absentee owner")
-                if isinstance(rec, dict):
-                    rec["flags"] = flags
-                else:
-                    try:
-                        rec.flags = flags
-                    except AttributeError:
-                        pass
+        if mail_s and mail_s not in ("OH","","0","3"):
+            rec.is_out_of_state = True
+            if "Out of state owner" not in rec.flags:
+                rec.flags.append("Out of state owner")
+            oos_ct += 1
 
-        # Out of state
-        is_oos = mail_state not in ("OH", "", "0", "3")
-        if is_oos:
-            oos += 1
-            if isinstance(rec, dict):
-                rec["is_out_of_state"] = True
-            else:
-                try:
-                    rec.is_out_of_state = True
-                except AttributeError:
-                    pass
-            flags = _get("flags") or []
-            if isinstance(flags, list) and "Out of state owner" not in flags:
-                flags.append("Out of state owner")
-                if isinstance(rec, dict):
-                    rec["flags"] = flags
-                else:
-                    try:
-                        rec.flags = flags
-                    except AttributeError:
-                        pass
+        luc_code = rec.luc.split("-")[0].strip() if rec.luc else ""
+        if luc_code in VACANT_LUCS or (luc_code.startswith(("4","5","7")) and luc_code.isdigit()):
+            rec.is_vacant_land = True
+            vacant_ct += 1
 
-        # Vacant land
-        is_vacant = luc in VACANT_LAND_LUCS or luc.startswith("5") or luc.startswith("4")
-        if is_vacant:
-            vacant += 1
-            if isinstance(rec, dict):
-                rec["is_vacant_land"] = True
-            else:
-                try:
-                    rec.is_vacant_land = True
-                except AttributeError:
-                    pass
-
-    logging.info(
-        "AREIS enrichment complete: %d/%d enriched | absentee=%d | out-of-state=%d | vacant=%d",
-        enriched, total, absentee, oos, vacant
-    )
+    logging.info("AREIS enrichment done: %d/%d enriched | absentee=%d | oos=%d | vacant=%d",
+                 enriched, len(records), absentee_ct, oos_ct, vacant_ct)
     return records
 
+# ── TLN SCRAPERS ──────────────────────────────────────────────────────────────
+async def scrape_tln_common_pleas() -> list:
+    logging.info("Scraping TLN Common Pleas...")
+    records = []
+    try:
+        html = await pw_fetch(TLN_CP)
+        soup = BeautifulSoup(html, "lxml")
+        urls = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "common_pleas" in href and "filings" in href:
+                full = href if href.startswith("http") else TLN_BASE + href
+                if full not in urls: urls.append(full)
+        logging.info("TLN CP: %d URLs to scrape", len(urls))
 
-# ─────────────────────────────────────────────────────────────────────────────
-# REPLACEMENT build_parcel_indexes() for Lucas County
-# ─────────────────────────────────────────────────────────────────────────────
-def build_parcel_indexes_lucas():
-    """
-    Lucas County doesn't have downloadable CAMA files.
-    Returns empty indexes — enrichment happens lazily via AREIS
-    after all records are scraped.
+        for url in urls[:80]:
+            try:
+                page_html = await pw_fetch(url)
+                page_soup = BeautifulSoup(page_html, "lxml")
+                text = page_soup.get_text(" ")
 
-    Replace your old build_parcel_indexes() call with this,
-    then call enrich_all_records_areis(all_records) after scraping.
-    """
-    logging.info("Lucas County: skipping ArcGIS parcel pull (no owner/addr fields).")
-    logging.info("Owner/address enrichment will happen via AREIS after scraping.")
+                # Parse filing entries
+                entries = re.split(r"\n{2,}", text)
+                for entry in entries:
+                    entry = clean(entry)
+                    if not entry or len(entry) < 20: continue
 
-    # Return empty structures matching what the rest of the code expects
-    owner_index = {}         # last_name -> list of parcel dicts
-    last_name_index = {}
-    first_last_index = {}
-    parcel_rows = []
-    mail_by_pid = {}
+                    # Look for case numbers CI20XX-XXXXX
+                    case_m = re.search(r"(CI\s*\d{4}[-\s]?\d{4,6})", entry, re.I)
+                    doc_num = clean(case_m.group(1)).replace(" ","") if case_m else ""
 
-    return owner_index, last_name_index, first_last_index, parcel_rows, mail_by_pid
+                    # Amount
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d*)", entry)
+                    amount = parse_amount(amt_m.group(1)) if amt_m else None
 
+                    # Date
+                    date_m = re.search(r"(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})", entry)
+                    filed = parse_date(date_m.group(1)) if date_m else ""
 
-# ─────────────────────────────────────────────────────────────────────────────
-# WHERE TO ADD enrich_all_records_areis() IN YOUR main()
-# ─────────────────────────────────────────────────────────────────────────────
-"""
-In your main() function, find the section after all scrapers finish
-and before writing output files. It probably looks like:
+                    # Owner — first capitalized name block
+                    owner_m = re.search(r"^([A-Z][a-zA-Z\s,\.]+?)(?:\s{2,}|\n|,\s*Et\s*Al)", entry)
+                    owner = clean(owner_m.group(1)) if owner_m else ""
 
-    all_records = clerk_records + probate_records + ...
-    all_records, report = enrich_with_parcel_data(all_records, ...)
-    all_records = apply_distress_stacking(all_records, ...)
-    all_records = dedupe_records(all_records)
+                    # Address
+                    addr_m = re.search(r"(\d{2,5}\s+[A-Za-z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way|Ter|Pkwy)\.?)", entry, re.I)
+                    prop_address = clean(addr_m.group(1)) if addr_m else ""
 
-Change it to:
+                    if not doc_num and not owner: continue
 
-    all_records = clerk_records + probate_records + ...
+                    # Determine type
+                    doc_type = "Pre-foreclosure"
+                    if "lis pendens" in entry.lower(): doc_type = "Pre-foreclosure"
+                    if "foreclosure" in entry.lower(): doc_type = "Pre-foreclosure"
+                    if "judgment" in entry.lower(): doc_type = "Judgment"
+                    if "lien" in entry.lower(): doc_type = "Lien"
 
-    # NEW: AREIS enrichment replaces the old parcel lookup
-    all_records = enrich_all_records_areis(all_records)
+                    rec = LeadRecord(
+                        owner=owner,
+                        prop_address=prop_address,
+                        prop_city="Toledo",
+                        doc_type=doc_type,
+                        filed=filed,
+                        amount=amount,
+                        doc_num=doc_num,
+                        clerk_url=url,
+                        flags=["Lis pendens"] if "lis pendens" in entry.lower() else [],
+                    )
+                    if is_within_lookback(filed):
+                        records.append(rec)
+            except Exception as e:
+                logging.debug("TLN CP page error %s: %s", url[:60], e)
 
-    all_records = apply_distress_stacking(all_records, ...)
-    all_records = dedupe_records(all_records)
+    except Exception as e:
+        logging.warning("TLN Common Pleas failed: %s", e)
 
-That's it. The AREIS enricher handles owner, address, mailing,
-absentee, out-of-state, and vacant flags all in one pass.
-"""
+    logging.info("TLN Common Pleas: %d records", len(records))
+    return records
+
+async def scrape_sheriff_sales() -> list:
+    logging.info("Scraping sheriff sales...")
+    records = []
+    try:
+        html = await pw_fetch(SHERIFF_CAL)
+        soup = BeautifulSoup(html, "lxml")
+        auction_urls = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "sheriffsaleauction" in href or "realauction" in href:
+                if href not in auction_urls: auction_urls.append(href)
+        logging.info("Sheriff auction URLs: %d", len(auction_urls))
+
+        for url in auction_urls[:15]:
+            try:
+                page_html = await pw_fetch(url)
+                page_soup = BeautifulSoup(page_html, "lxml")
+                text = page_soup.get_text(" ")
+
+                addr_matches = re.findall(
+                    r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct)\.?),?\s*(Toledo|Maumee|Sylvania|Oregon)",
+                    text, re.I
+                )
+                for addr, city in addr_matches:
+                    sale_m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", text)
+                    sale_date = parse_date(sale_m.group(1)) if sale_m else ""
+                    case_m = re.search(r"(TF\d{4,}|CI\d{4,})", text)
+                    doc_num = clean(case_m.group(1)) if case_m else ""
+                    amt_m = re.search(r"\$\s*([\d,]+)", text)
+                    amount = parse_amount(amt_m.group(1)) if amt_m else None
+
+                    rec = LeadRecord(
+                        prop_address=clean(addr),
+                        prop_city=clean(city),
+                        doc_type="Sheriff Sale",
+                        filed=sale_date,
+                        amount=amount,
+                        doc_num=doc_num,
+                        clerk_url=url,
+                        score=100,
+                        flags=["Sheriff sale scheduled","Pre-foreclosure","Hot Stack","New this week"],
+                        hot_stack=True,
+                        distress_sources=["Sheriff Sale"],
+                        distress_count=1,
+                    )
+                    records.append(rec)
+            except Exception as e:
+                logging.debug("Sheriff page error: %s", e)
+
+    except Exception as e:
+        logging.warning("Sheriff sales failed: %s", e)
+
+    logging.info("Sheriff sales: %d", len(records))
+    return records
+
+async def scrape_probate() -> list:
+    logging.info("Scraping TLN Probate...")
+    records = []
+    try:
+        html = await pw_fetch(TLN_PROBATE)
+        soup = BeautifulSoup(html, "lxml")
+        urls = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "probate" in href and ("filing" in href or "case" in href):
+                full = href if href.startswith("http") else TLN_BASE + href
+                if full not in urls: urls.append(full)
+
+        for url in urls[:10]:
+            try:
+                page_html = await pw_fetch(url)
+                page_soup = BeautifulSoup(page_html, "lxml")
+                text = page_soup.get_text(" ")
+
+                # Estate of / In Re patterns
+                for m in re.finditer(r"(?:Estate of|In Re[:\s]+|In the Matter of)\s+([A-Z][a-zA-Z\s,\.]+?)(?:\.|,|\n|deceased)", text, re.I):
+                    name = clean(m.group(1))
+                    if len(name) < 4: continue
+                    case_m = re.search(r"(20\d{2}\s*[A-Z]{2,3}\s*\d{4,})", text)
+                    rec = LeadRecord(
+                        owner=name,
+                        doc_type="Probate",
+                        clerk_url=url,
+                        flags=["Probate","Inherited"],
+                        is_inherited=True,
+                        doc_num=clean(case_m.group(1)) if case_m else "",
+                    )
+                    records.append(rec)
+            except Exception as e:
+                logging.debug("Probate page error: %s", e)
+
+    except Exception as e:
+        logging.warning("Probate scrape failed: %s", e)
+
+    logging.info("Probate: %d", len(records))
+    return records
+
+async def scrape_foreclosures() -> list:
+    logging.info("Scraping foreclosure notices...")
+    records = []
+    try:
+        html = await pw_fetch(TLN_FORECLOSURE)
+        soup = BeautifulSoup(html, "lxml")
+        urls = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "foreclosure" in href and ("case" in href or "ci20" in href.lower()):
+                full = href if href.startswith("http") else TLN_BASE + href
+                if full not in urls: urls.append(full)
+
+        for url in urls[:55]:
+            try:
+                page_html = await pw_fetch(url)
+                if len(page_html) < 500: continue
+                page_soup = BeautifulSoup(page_html, "lxml")
+                text = page_soup.get_text(" ")
+
+                case_m = re.search(r"Case\s*No\.?\s*(CI\s*\d{4}[-\s]?\d{4,6})", text, re.I)
+                doc_num = clean(case_m.group(1)).replace(" ","") if case_m else ""
+
+                addr_m = re.search(
+                    r"(?:known as|located at|premises|property)[:\s]*(\d{2,5}\s+[A-Za-z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way)\.?)",
+                    text, re.I
+                )
+                prop_address = clean(addr_m.group(1)) if addr_m else ""
+
+                owner_m = re.search(r"(?:Defendant[s]?|Owner)[:\s]+([A-Z][A-Za-z\s,\.]+?)(?:\.|,\s*Et\s*Al|;|\n)", text, re.I)
+                owner = clean(owner_m.group(1)) if owner_m else ""
+
+                amt_m = re.search(r"\$\s*([\d,]+\.?\d*)", text)
+                amount = parse_amount(amt_m.group(1)) if amt_m else None
+
+                date_m = re.search(r"filed[:\s]*(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})", text, re.I)
+                if not date_m:
+                    date_m = re.search(r"(\d{4}-\d{2}-\d{2})", url)
+                filed = parse_date(date_m.group(1)) if date_m else ""
+
+                if not doc_num and not prop_address: continue
+
+                rec = LeadRecord(
+                    owner=owner,
+                    prop_address=prop_address,
+                    prop_city="Toledo",
+                    doc_type="Foreclosure",
+                    filed=filed,
+                    amount=amount,
+                    doc_num=doc_num,
+                    clerk_url=url,
+                    flags=["Pre-foreclosure","Lis pendens"],
+                )
+                records.append(rec)
+            except Exception as e:
+                logging.debug("Foreclosure page error: %s", e)
+
+    except Exception as e:
+        logging.warning("Foreclosure scrape failed: %s", e)
+
+    logging.info("Foreclosures: %d", len(records))
+    return records
+
+async def scrape_tax_delinquent() -> list:
+    logging.info("Scraping tax delinquent...")
+    records = []
+    try:
+        html = await pw_fetch(TREASURER_URL)
+        soup = BeautifulSoup(html, "lxml")
+        text = soup.get_text(" ")
+
+        # Try to find any parcel / owner / address listings
+        for url in [TREASURER_URL, f"{TLN_FORECLOSURE}"]:
+            page_html = await pw_fetch(url)
+            page_soup = BeautifulSoup(page_html, "lxml")
+            page_text = page_soup.get_text(" ")
+
+            addr_matches = re.findall(
+                r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd)\.?)\s*(?:Toledo|Maumee|Lucas)",
+                page_text, re.I
+            )
+            for addr in addr_matches[:50]:
+                rec = LeadRecord(
+                    prop_address=clean(addr),
+                    prop_city="Toledo",
+                    doc_type="Tax Delinquent",
+                    flags=["Tax delinquent"],
+                    clerk_url=url,
+                )
+                records.append(rec)
+
+    except Exception as e:
+        logging.warning("Tax delinquent scrape failed: %s", e)
+
+    logging.info("Tax delinquent: %d", len(records))
+    return records
+
+# ── DISTRESS STACKING ─────────────────────────────────────────────────────────
+def apply_distress_stacking(records: list) -> list:
+    # Build address index
+    addr_index: dict = {}
+    for rec in records:
+        key = re.sub(r"\s+","", clean(rec.prop_address).upper())
+        if key:
+            addr_index.setdefault(key, []).append(rec)
+
+    # Stack
+    for key, group in addr_index.items():
+        if len(group) < 2: continue
+        sources = list({r.doc_type for r in group})
+        for rec in group:
+            for s in sources:
+                if s not in rec.distress_sources:
+                    rec.distress_sources.append(s)
+            rec.distress_count = len(rec.distress_sources)
+            if rec.distress_count >= HOT_STACK_MIN_SOURCES:
+                rec.hot_stack = True
+                if "Hot Stack" not in rec.flags:
+                    rec.flags.append("Hot Stack")
+
+    return records
+
+def dedupe(records: list) -> list:
+    seen = set()
+    out = []
+    for rec in records:
+        key = (
+            re.sub(r"\s+","", clean(rec.doc_num).upper()) or
+            re.sub(r"\s+","", clean(rec.prop_address).upper() + clean(rec.doc_type).upper())
+        )
+        if key and key not in seen:
+            seen.add(key)
+            out.append(rec)
+    return out
+
+def tag_new_this_week(records: list) -> list:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    for rec in records:
+        if rec.filed and rec.filed >= cutoff:
+            if "New this week" not in rec.flags:
+                rec.flags.append("New this week")
+    return records
+
+# ── WRITE OUTPUTS ─────────────────────────────────────────────────────────────
+def write_outputs(records: list, sheriff: list, probate: list,
+                  tax_delinquent: list, foreclosures: list):
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    def to_dict(r):
+        d = asdict(r)
+        d["score"] = score_record(r)
+        return d
+
+    all_dicts = [to_dict(r) for r in records]
+
+    # Main records
+    for p in [DATA_DIR/"records.json", DASHBOARD_DIR/"records.json"]:
+        write_json(p, all_dicts)
+    logging.info("Wrote %s (records.json: %d records)", DATA_DIR, len(all_dicts))
+
+    # Hot stack
+    hot = [d for d in all_dicts if d.get("hot_stack")]
+    for p in [DATA_DIR/"hot_stack.json", DASHBOARD_DIR/"hot_stack.json"]:
+        write_json(p, hot)
+
+    # Sheriff
+    s_dicts = [to_dict(r) for r in sheriff]
+    for p in [DATA_DIR/"sheriff_sales.json", DASHBOARD_DIR/"sheriff_sales.json"]:
+        write_json(p, s_dicts)
+
+    # Probate
+    pr_dicts = [to_dict(r) for r in probate]
+    for p in [DATA_DIR/"probate.json", DASHBOARD_DIR/"probate.json"]:
+        write_json(p, pr_dicts)
+
+    # Tax delinquent
+    td_dicts = [to_dict(r) for r in tax_delinquent]
+    for p in [DATA_DIR/"tax_delinquent.json", DASHBOARD_DIR/"tax_delinquent.json"]:
+        write_json(p, td_dicts)
+
+    # Foreclosures
+    fc_dicts = [to_dict(r) for r in foreclosures]
+    for p in [DATA_DIR/"foreclosure.json", DASHBOARD_DIR/"foreclosure.json"]:
+        write_json(p, fc_dicts)
+
+    # Category filters
+    absentee = [d for d in all_dicts if d.get("is_absentee")]
+    oos      = [d for d in all_dicts if d.get("is_out_of_state")]
+    vacant   = [d for d in all_dicts if d.get("is_vacant_land")]
+    inherited= [d for d in all_dicts if d.get("is_inherited")]
+    liens    = [d for d in all_dicts if "lien" in d.get("doc_type","").lower() or "Lien" in (d.get("flags") or [])]
+    divorces = [d for d in all_dicts if "divorce" in d.get("doc_type","").lower()]
+
+    for fname, data in [
+        ("absentee.json", absentee), ("out_of_state.json", oos),
+        ("subject_to.json", []), ("divorces.json", divorces),
+        ("bankruptcy.json", []), ("code_violations.json", []),
+        ("liens.json", liens), ("inherited.json", inherited),
+        ("vacant_land.json", vacant),
+    ]:
+        for p in [DATA_DIR/fname, DASHBOARD_DIR/fname]:
+            write_json(p, data)
+
+    # GHL CSV
+    csv_path = DATA_DIR / "ghl_export.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=[
+            "First Name","Last Name","Phone","Email",
+            "Property Address","Property City","Property Zip",
+            "Mailing Address","Mailing City","Mailing State","Mailing Zip",
+            "Lead Type","Date Filed","Document Number","Amount/Debt Owed",
+            "Seller Score","Motivated Seller Flags","Distress Sources",
+            "Distress Count","Hot Stack","Absentee Owner","Out of State",
+            "Vacant Land","Inherited","Equity Est","Parcel ID","LUC","Source",
+            "Public Records URL",
+        ])
+        w.writeheader()
+        for d in all_dicts:
+            owner = d.get("owner","") or ""
+            parts = owner.split()
+            first = parts[0] if parts else ""
+            last  = " ".join(parts[1:]) if len(parts)>1 else ""
+            emv = d.get("est_market_value")
+            w.writerow({
+                "First Name": first, "Last Name": last,
+                "Phone": d.get("phone",""),
+                "Email": "",
+                "Property Address": d.get("prop_address",""),
+                "Property City": d.get("prop_city",""),
+                "Property Zip": d.get("prop_zip",""),
+                "Mailing Address": d.get("mail_address",""),
+                "Mailing City": d.get("mail_city",""),
+                "Mailing State": d.get("mail_state",""),
+                "Mailing Zip": d.get("mail_zip",""),
+                "Lead Type": d.get("doc_type",""),
+                "Date Filed": d.get("filed",""),
+                "Document Number": d.get("doc_num",""),
+                "Amount/Debt Owed": d.get("amount",""),
+                "Seller Score": score_record(LeadRecord(**{k:v for k,v in d.items() if k in LeadRecord.__dataclass_fields__})),
+                "Motivated Seller Flags": "; ".join(d.get("flags") or []),
+                "Distress Sources": "; ".join(d.get("distress_sources") or []),
+                "Distress Count": d.get("distress_count",0),
+                "Hot Stack": "YES" if d.get("hot_stack") else "",
+                "Absentee Owner": "YES" if d.get("is_absentee") else "",
+                "Out of State": "YES" if d.get("is_out_of_state") else "",
+                "Vacant Land": "YES" if d.get("is_vacant_land") else "",
+                "Inherited": "YES" if d.get("is_inherited") else "",
+                "Equity Est": f"${emv:,.0f}" if emv else "",
+                "Parcel ID": d.get("parcel_id",""),
+                "LUC": d.get("luc",""),
+                "Source": SOURCE_NAME,
+                "Public Records URL": d.get("clerk_url",""),
+            })
+    logging.info("Wrote CSV: %s (%d rows)", csv_path, len(all_dicts))
+
+    # Enriched CSV
+    enr_path = DATA_DIR / "records.enriched.csv"
+    with open(enr_path, "w", newline="", encoding="utf-8") as f:
+        if all_dicts:
+            w = csv.DictWriter(f, fieldnames=list(all_dicts[0].keys()))
+            w.writeheader()
+            w.writerows(all_dicts)
+    logging.info("Wrote CSV: %s (%d rows)", enr_path, len(all_dicts))
+
+    logging.info(
+        "=== DONE === Total:%d | Sheriff:%d | HotStack:%d | Probate:%d | "
+        "Foreclosure:%d | TaxDelin:%d | Absentee:%d | OOS:%d | Vacant:%d | "
+        "Inherited:%d | Liens:%d | Divorce:%d | BK:0 | CodeViol:0",
+        len(all_dicts), len(s_dicts), len(hot), len(pr_dicts),
+        len(fc_dicts), len(td_dicts), len(absentee), len(oos),
+        len(vacant), len(inherited), len(liens), len(divorces),
+    )
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
+async def main():
+    ensure_dirs()
+    log_setup()
+    logging.info("=== Toledo / Lucas County - Motivated Seller Intelligence ===")
+    logging.info("Lookback: %d days | Started: %s", LOOKBACK_DAYS, datetime.now(timezone.utc).isoformat())
+    logging.info("Starting all scrapers...")
+
+    # Scrape all sources concurrently
+    cp_task    = asyncio.create_task(scrape_tln_common_pleas())
+    sh_task    = asyncio.create_task(scrape_sheriff_sales())
+    pr_task    = asyncio.create_task(scrape_probate())
+    fc_task    = asyncio.create_task(scrape_foreclosures())
+    td_task    = asyncio.create_task(scrape_tax_delinquent())
+
+    cp_records = await cp_task
+    sh_records = await sh_task
+    pr_records = await pr_task
+    fc_records = await fc_task
+    td_records = await td_task
+
+    # Combine all
+    all_records = cp_records + sh_records + pr_records + fc_records + td_records
+    logging.info("Total before enrich: %d", len(all_records))
+
+    # AREIS enrichment — owner, address, mailing, absentee, OOS, vacant
+    all_records = enrich_with_areis(all_records)
+
+    # Score every record
+    for rec in all_records:
+        rec.score = score_record(rec)
+
+    # Tag new this week
+    all_records = tag_new_this_week(all_records)
+
+    # Distress stacking
+    all_records = apply_distress_stacking(all_records)
+
+    # Dedupe
+    all_records = dedupe(all_records)
+    logging.info("Total after dedupe: %d", len(all_records))
+
+    # Sort: hot stack first, then score
+    all_records.sort(key=lambda r: (r.hot_stack, r.distress_count, r.score), reverse=True)
+
+    # Write everything
+    write_outputs(all_records, sh_records, pr_records, td_records, fc_records)
+
+if __name__ == "__main__":
+    asyncio.run(main())
