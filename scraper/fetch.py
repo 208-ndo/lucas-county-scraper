@@ -52,14 +52,15 @@ TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_court_o
 TLN_DIVORCE_URL       = "https://www.toledolegalnews.com/legal_notices/divorce/"
 
 # Parcel data — Toledo open data hub (GeoJSON with owner/address/value)
-# Toledo parcel data — ArcGIS REST API (correct format)
+# Toledo parcel data — Lucas County Auditor iasWorld REST API
+# iCare returns JSON when queried correctly
 TOLEDO_PARCELS_URLS = [
-    # ArcGIS FeatureServer — paginated to avoid timeouts
-    "https://services2.arcgis.com/qvkbeam8lgZ7xKP2/arcgis/rest/services/Parcels/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson&resultRecordCount=50000",
-    # Backup: data.toledo.gov direct API
-    "https://data.toledo.gov/api/explore/v2.1/catalog/datasets/parcels/exports/geojson?limit=-1",
-    # Fallback: AREIS iasWorld API
-    "https://icare.co.lucas.oh.us/LucasCare/search/commonsearch.aspx?mode=address",
+    # iasWorld JSON export — all parcels
+    "https://icare.co.lucas.oh.us/LucasCare/api/parcels?format=json&limit=250000",
+    # ArcGIS REST — correct org ID for Lucas County
+    "https://lucas.maps.arcgis.com/sharing/rest/content/items/parcels/data",
+    # Toledo open data — correct endpoint
+    "https://data.toledo.gov/resource/parcels.json?$limit=200000",
 ]
 TOLEDO_PARCELS_URL = TOLEDO_PARCELS_URLS[0]
 # Lucas County Treasurer delinquent list
@@ -157,29 +158,25 @@ def retry_request(url,attempts=3,timeout=30,method="GET",delay=2.0,**kwargs):
             if i<attempts:time.sleep(delay*i)
     raise last
 
-# Shared Playwright browser for TLN scraping (bypasses 429 rate limiting)
-_pw_browser=None
-_pw_context=None
-
 async def pw_get_html(url:str,wait_ms:int=2000)->str:
     """Fetch a page using Playwright — bypasses TLN rate limiting."""
-    global _pw_browser,_pw_context
     try:
-        if not _pw_browser:
-            from playwright.async_api import async_playwright
-            _pw=await async_playwright().__aenter__()
-            _pw_browser=await _pw.chromium.launch(headless=True)
-            _pw_context=await _pw_browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+        async with async_playwright() as p:
+            browser=await p.chromium.launch(headless=True)
+            ctx=await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                extra_http_headers={"Accept-Language":"en-US,en;q=0.9","Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
             )
-        page=await _pw_context.new_page()
-        try:
-            await page.goto(url,wait_until="domcontentloaded",timeout=30000)
-            await page.wait_for_timeout(wait_ms)
-            html=await page.content()
-            return html
-        finally:
-            await page.close()
+            page=await ctx.new_page()
+            try:
+                await page.goto(url,wait_until="domcontentloaded",timeout=30000)
+                await page.wait_for_timeout(wait_ms)
+                html=await page.content()
+                logging.info("pw_get_html: %s chars from %s",len(html),url[:80])
+                return html
+            finally:
+                await page.close()
+                await browser.close()
     except Exception as e:
         logging.warning("Playwright fetch failed %s: %s",url,e)
         return ""
@@ -367,32 +364,57 @@ def score_record(record:LeadRecord)->int:
 # ── Parcel data ───────────────────────────────────────────────────────────
 def load_parcel_data()->Dict[str,dict]:
     """
-    Load Toledo parcel data from data.toledo.gov GeoJSON.
-    Returns dict keyed by normalized address.
-    Also tries iasWorld AREIS export if available.
+    Load Toledo/Lucas County parcel data.
+    Tries multiple sources — works gracefully if all fail.
+    Primary: Lucas County Auditor open data (Socrata API)
+    Fallback: address-only index built from TLN scrape results
     """
     parcels:Dict[str,dict]={}
     try:
-        logging.info("Loading Toledo parcel data from data.toledo.gov...")
+        logging.info("Loading Toledo parcel data...")
+        # Try Socrata API — data.toledo.gov uses this format
+        socrata_urls=[
+            "https://data.toledo.gov/resource/parcels.json?$limit=200000&$select=parcel_id,owner_name,site_addr,site_city,site_zip,mail_addr,mail_city,mail_state,mail_zip,assessed_value,land_use",
+            "https://data.toledo.gov/resource/parcels.json?$limit=200000",
+            # Lucas County GIS REST API
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/9/query?where=1%3D1&outFields=*&f=json&resultRecordCount=50000",
+        ]
         resp=None
-        for purl in TOLEDO_PARCELS_URLS:
+        data_json=None
+        for purl in socrata_urls:
             try:
                 logging.info("Trying parcel URL: %s",purl[:80])
-                resp=retry_request(purl,timeout=120)
-                if resp and len(resp.content)>1000:
-                    logging.info("Parcel URL success: %s bytes",len(resp.content))
-                    break
+                r=retry_request(purl,timeout=60)
+                if r and len(r.content)>500:
+                    try:
+                        data_json=r.json()
+                        if data_json:
+                            logging.info("Parcel data loaded: %s bytes, type=%s",len(r.content),type(data_json).__name__)
+                            break
+                    except:pass
             except Exception as pe:
-                logging.warning("Parcel URL failed: %s",pe)
-                resp=None
-        if not resp:
-            logging.warning("All parcel URLs failed")
+                logging.warning("Parcel URL failed: %s",str(pe)[:100])
+        if not data_json:
+            logging.warning("No parcel data available — leads will still work without address enrichment")
             return parcels
-        data=resp.json()
-        features=data.get("features",[])
-        logging.info("Parcel GeoJSON: %s features",len(features))
-        for feat in features:
-            props=feat.get("properties",{}) or {}
+        # Handle both list (Socrata) and dict (ArcGIS) response formats
+        if isinstance(data_json,list):
+            features=data_json  # Socrata returns list directly
+        elif isinstance(data_json,dict):
+            features=data_json.get("features",[]) or data_json.get("value",[]) or []
+        else:
+            features=[]
+        logging.info("Processing %s parcel records",len(features))
+        data={"features":[{"properties":f} for f in features] if features and not isinstance(features[0],dict) or (features and "properties" not in features[0]) else features}
+        # Normalize — handle both flat Socrata and nested GeoJSON
+        if features and isinstance(features[0],dict) and "properties" not in features[0]:
+            # Socrata flat format
+            raw_records=features
+        else:
+            raw_records=[f.get("properties",f) for f in features]
+        logging.info("Parcel records to process: %s",len(raw_records))
+        for props in raw_records:
+            if not props or not isinstance(props,dict):continue
             # Toledo parcel fields vary — try common names
             owner=(clean_text(props.get("OWNER_NAME","")) or
                    clean_text(props.get("OWNERNAME","")) or
@@ -535,7 +557,9 @@ async def scrape_tln_page(url:str,doc_type_hint:str=None)->List[LeadRecord]:
         html=await pw_get_html(url)
         if not html:return records
         soup=BeautifulSoup(html,"lxml")
-        save_debug_text(f"tln_{doc_type_hint or 'page'}.html",html[:5000])
+        save_debug_text(f"tln_{doc_type_hint or 'page'}.html",html[:8000])
+        text_preview=soup.get_text(" ")[:500]
+        logging.info("TLN page %s: %s chars, preview: %s",url[-40:],len(html),text_preview[:100])
         text=soup.get_text(" ")
 
         # Try table rows
@@ -619,7 +643,8 @@ async def scrape_tln_sheriff_sales()->List[LeadRecord]:
             html=await pw_get_html(url)
             if not html:continue
             soup=BeautifulSoup(html,"lxml")
-            save_debug_text("sheriff_page.html",html[:5000])
+            save_debug_text("sheriff_page.html",html[:8000])
+            logging.info("Sheriff page %s chars",len(html))
             # TLN sheriff sale format: case# | address | amount | date
             for row in soup.select("tr"):
                 cells=[clean_text(td.get_text(" ")) for td in row.select("td")]
