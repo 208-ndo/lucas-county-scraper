@@ -350,13 +350,20 @@ def enrich_with_areis(records: list) -> list:
 async def scrape_tln_common_pleas() -> list:
     logging.info("Scraping TLN Common Pleas...")
     records = []
+
+    # Reject fake addresses (social share text, case listings, etc.)
+    BAD_ADDR = re.compile(
+        r"facebook|twitter|whatsapp|email|print|copy|save|"
+        r"vs\s+[A-Z]|jaffee|christ|west$|direct$|shelter$|fifth\s+third|"
+        r"^\d{5}\s+\w", re.I)
+
     try:
         html = await pw_fetch(TLN_CP)
         soup = BeautifulSoup(html, "lxml")
         urls = []
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if "common_pleas" in href and "filing" in href:
+            if "common_pleas" in href and ("filing" in href or "received" in href):
                 full = href if href.startswith("http") else TLN_BASE + href
                 if full not in urls: urls.append(full)
         logging.info("TLN CP: %d URLs to scrape", len(urls))
@@ -366,34 +373,62 @@ async def scrape_tln_common_pleas() -> list:
                 page_html = await pw_fetch(url)
                 if len(page_html) < 300: continue
                 page_soup = BeautifulSoup(page_html, "lxml")
-                text = page_soup.get_text(" ")
-                entries = re.split(r"\n{2,}", text)
 
-                for entry in entries:
-                    entry = clean(entry)
-                    if not entry or len(entry) < 20: continue
-                    case_m = re.search(r"(CI\s*\d{4}[-\s]?\d{4,6})", entry, re.I)
-                    doc_num = clean(case_m.group(1)).replace(" ","") if case_m else ""
-                    amt_m = re.search(r"\$\s*([\d,]+\.?\d*)", entry)
+                # Get article/body content only
+                article = page_soup.find("div", class_=re.compile(r"article|content|body", re.I))
+                if not article:
+                    article = page_soup.find("article") or page_soup.find("main") or page_soup
+                text = article.get_text(" ")
+
+                # Split on case entries — each line or paragraph is a case
+                lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+                for line in lines:
+                    line = clean(line)
+                    if len(line) < 15: continue
+                    # Must have a case number to be valid
+                    case_m = re.search(r"(CI\s*\d{4}[-\s]?\d{4,6})", line, re.I)
+                    if not case_m: continue
+                    doc_num = re.sub(r"[-\s]", "", clean(case_m.group(1))).upper()
+
+                    # Amount
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", line)
                     amount = parse_amount(amt_m.group(1)) if amt_m else None
-                    date_m = re.search(r"(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})", entry)
+
+                    # Date
+                    date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", line)
                     filed = parse_date(date_m.group(1)) if date_m else ""
-                    owner_m = re.search(r"^([A-Z][a-zA-Z\s,\.]+?)(?:\s{2,}|\n|,\s*Et\s*Al)", entry)
-                    owner = clean(owner_m.group(1)) if owner_m else ""
+
+                    # Property address — only accept real street addresses
                     addr_m = re.search(
-                        r"(\d{3,5}\s+[A-Za-z][A-Za-z\s]+"
-                        r"(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way|Ter|Pkwy)\.?)",
-                        entry, re.I)
-                    prop_address = clean(addr_m.group(1)) if addr_m else ""
-                    if not doc_num and not owner: continue
-                    doc_type = "Pre-foreclosure"
-                    if "judgment" in entry.lower(): doc_type = "Judgment"
-                    if "lien" in entry.lower():     doc_type = "Lien"
+                        r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way|Terr|Pkwy)\.?)"
+                        r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                        line, re.I)
+                    prop_address = ""
+                    prop_city = "Toledo"
+                    if addr_m:
+                        prop_address = clean(addr_m.group(1))
+                        prop_city = clean(addr_m.group(2)).title()
+                        if BAD_ADDR.search(prop_address):
+                            prop_address = ""
+
+                    # Doc type
+                    doc_type = "Lien"
+                    line_l = line.lower()
+                    if "judgment" in line_l: doc_type = "Judgment"
+                    if "foreclosure" in line_l or "lis pendens" in line_l: doc_type = "Pre-foreclosure"
+                    if "lien" in line_l: doc_type = "Lien"
+
                     rec = LeadRecord(
-                        owner=owner, prop_address=prop_address, prop_city="Toledo",
-                        doc_type=doc_type, filed=filed, amount=amount,
-                        doc_num=doc_num, clerk_url=url,
-                        flags=["Lis pendens"] if "lis pendens" in entry.lower() else [],
+                        prop_address=prop_address,
+                        prop_city=prop_city,
+                        doc_type=doc_type,
+                        filed=filed,
+                        amount=amount,
+                        doc_num=doc_num,
+                        clerk_url=url,
+                        distress_sources=[doc_type],
+                        distress_count=1,
                     )
                     if is_within_lookback(filed):
                         records.append(rec)
@@ -407,42 +442,118 @@ async def scrape_tln_common_pleas() -> list:
 async def scrape_sheriff_sales() -> list:
     logging.info("Scraping sheriff sales...")
     records = []
+
+    # Lucas County uses realauction.com — try their JSON API directly
+    REALAUCTION_URLS = [
+        "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=AUCTION&zmethod=PREVIEW&AUCTIONDATE=",
+        "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=AUCTION&zmethod=GET_AUCTIONS&StartDate=01/01/2025&EndDate=12/31/2026",
+        "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=USER&zmethod=CALENDAR",
+    ]
+
     try:
-        html = await pw_fetch(SHERIFF_CAL)
+        # Try the calendar page which lists upcoming sales
+        html = await pw_fetch(REALAUCTION_URLS[2])
         soup = BeautifulSoup(html, "lxml")
+
+        # Find any auction date links
         auction_urls = []
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if "sheriffsaleauction" in href or "realauction" in href:
-                if href not in auction_urls: auction_urls.append(href)
-        logging.info("Sheriff auction URLs: %d", len(auction_urls))
-        for url in auction_urls[:15]:
+            if "AUCTION" in href.upper() or "auction" in href.lower() or "sale" in href.lower():
+                full = href if href.startswith("http") else "https://lucas.sheriffsaleauction.ohio.gov" + href
+                if full not in auction_urls:
+                    auction_urls.append(full)
+
+        logging.info("Sheriff auction URLs found: %d", len(auction_urls))
+
+        # Also try scraping individual auction listing pages
+        for url in auction_urls[:10]:
             try:
                 page_html = await pw_fetch(url)
+                if len(page_html) < 300: continue
                 page_soup = BeautifulSoup(page_html, "lxml")
-                text = page_soup.get_text(" ")
+                page_text = page_soup.get_text(" ")
+
+                # Find all property addresses on auction page
                 addr_matches = re.findall(
-                    r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct)\.?)"
-                    r",?\s*(Toledo|Maumee|Sylvania|Oregon)", text, re.I)
+                    r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way)\.?)"
+                    r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg|Lucas)",
+                    page_text, re.I)
+
+                sale_date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", page_text)
+                sale_date = parse_date(sale_date_m.group(1)) if sale_date_m else ""
+
                 for addr, city in addr_matches:
-                    sale_m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", text)
-                    case_m = re.search(r"(TF\d{4,}|CI\d{4,})", text)
-                    amt_m  = re.search(r"\$\s*([\d,]+)", text)
+                    amt_m = re.search(r"\$\s*([\d,]+)", page_text)
+                    case_m = re.search(r"(CI[-\s]?\d{4}[-\s]\d{4,6}|TF\d{6,})", page_text, re.I)
                     rec = LeadRecord(
-                        prop_address=clean(addr), prop_city=clean(city),
+                        prop_address=clean(addr),
+                        prop_city=clean(city).title(),
                         doc_type="Sheriff Sale",
-                        filed=parse_date(sale_m.group(1)) if sale_m else "",
+                        filed=sale_date,
                         amount=parse_amount(amt_m.group(1)) if amt_m else None,
-                        doc_num=clean(case_m.group(1)) if case_m else "",
-                        clerk_url=url, score=100,
-                        flags=["Sheriff sale scheduled","Pre-foreclosure","Hot Stack","New this week"],
-                        hot_stack=True, distress_sources=["Sheriff Sale"], distress_count=1,
+                        doc_num=clean(case_m.group(1)).replace(" ","").upper() if case_m else "",
+                        clerk_url=url,
+                        score=100,
+                        flags=["Sheriff sale scheduled", "Pre-foreclosure", "Hot Stack", "New this week"],
+                        hot_stack=True,
+                        distress_sources=["Sheriff Sale"],
+                        distress_count=1,
                     )
                     records.append(rec)
             except Exception as e:
                 logging.debug("Sheriff page error: %s", e)
+
     except Exception as e:
         logging.warning("Sheriff sales failed: %s", e)
+
+    # Fallback: scrape the Ohio Attorney General sheriff sale list for Lucas County
+    if not records:
+        try:
+            logging.info("Trying OhioAG sheriff sale fallback...")
+            AG_URL = "https://www.ohioattorneygeneral.gov/Business/Services-for-Business/Charitable-Law/Search-Charitable-Organizations"
+            # Actually scrape common pleas for sheriff sale filings
+            CP_SHERIFF_URL = f"{TLN_BASE}/courts/common_pleas/"
+            html2 = await pw_fetch(CP_SHERIFF_URL)
+            soup2 = BeautifulSoup(html2, "lxml")
+            sheriff_urls = []
+            for a in soup2.find_all("a", href=True):
+                href = a["href"]
+                if ("sheriff" in href.lower() or "tf20" in href.lower()):
+                    full = href if href.startswith("http") else TLN_BASE + href
+                    if full not in sheriff_urls: sheriff_urls.append(full)
+            logging.info("TLN sheriff URLs: %d", len(sheriff_urls))
+            for url in sheriff_urls[:20]:
+                try:
+                    ph = await pw_fetch(url)
+                    if len(ph) < 500: continue
+                    ps = BeautifulSoup(ph, "lxml")
+                    text = ps.get_text(" ")
+                    addr_m = re.search(
+                        r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)"
+                        r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon)", text, re.I)
+                    case_m = re.search(r"(TF\s*\d{4}[-\s]?\d{4,6}|CI\s*\d{4}[-\s]?\d{4,6})", text, re.I)
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d*)", text)
+                    date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", text)
+                    if not addr_m and not case_m: continue
+                    records.append(LeadRecord(
+                        prop_address=clean(addr_m.group(1)) if addr_m else "",
+                        prop_city=clean(addr_m.group(2)).title() if addr_m else "Toledo",
+                        doc_type="Sheriff Sale",
+                        filed=parse_date(date_m.group(1)) if date_m else "",
+                        amount=parse_amount(amt_m.group(1)) if amt_m else None,
+                        doc_num=clean(case_m.group(1)).replace(" ","").upper() if case_m else "",
+                        clerk_url=url, score=100,
+                        flags=["Sheriff sale scheduled","Pre-foreclosure","Hot Stack"],
+                        hot_stack=True,
+                        distress_sources=["Sheriff Sale"],
+                        distress_count=1,
+                    ))
+                except Exception as e:
+                    logging.debug("Sheriff TLN page error: %s", e)
+        except Exception as e:
+            logging.warning("Sheriff fallback failed: %s", e)
+
     logging.info("Sheriff sales: %d", len(records))
     return records
 
@@ -455,24 +566,46 @@ async def scrape_probate() -> list:
         urls = []
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if "probate" in href and ("filing" in href or "case" in href):
+            if "probate" in href and ("filing" in href or "court-filing" in href or "received" in href):
                 full = href if href.startswith("http") else TLN_BASE + href
                 if full not in urls: urls.append(full)
+
+        logging.info("Probate URLs found: %d", len(urls))
+
         for url in urls[:10]:
             try:
                 page_html = await pw_fetch(url)
+                if len(page_html) < 500: continue
                 page_soup = BeautifulSoup(page_html, "lxml")
                 text = page_soup.get_text(" ")
+
+                # Only match Estate of / deceased — NOT guardianship, trusteeship, name changes
                 for m in re.finditer(
-                    r"(?:Estate of|In Re[:\s]+|In the Matter of)\s+"
-                    r"([A-Z][a-zA-Z\s,\.]+?)(?:\.|,|\n|deceased)", text, re.I):
+                    r"(?:Estate\s+of|In\s+Re\s+(?:Estate\s+of)?|In\s+the\s+Matter\s+of\s+(?:the\s+)?Estate\s+of)\s+"
+                    r"([A-Z][a-zA-Z]+(?:\s+[A-Za-z]+){1,4})"
+                    r"(?:\s*,?\s*deceased|\s*\.\s*Case|\s*,\s*[A-Z]|\s+\w+\s+No\.?)",
+                    text, re.I):
+
                     name = clean(m.group(1))
-                    if len(name) < 4: continue
+                    # Skip if it looks like a guardianship, trusteeship, or name change leaked through
+                    if re.search(r"guardian|trustee|name\s+change|minor|ward", name, re.I):
+                        continue
+                    if len(name) < 4 or len(name) > 50:
+                        continue
+                    # Skip single-word names (probably truncated)
+                    if len(name.split()) < 2:
+                        continue
+
                     case_m = re.search(r"(20\d{2}\s*[A-Z]{2,3}\s*\d{4,})", text)
                     records.append(LeadRecord(
-                        owner=name, doc_type="Probate", clerk_url=url,
-                        flags=["Probate","Inherited"], is_inherited=True,
+                        owner=name,
+                        doc_type="Probate",
+                        clerk_url=url,
+                        flags=["Probate", "Inherited"],
+                        is_inherited=True,
                         doc_num=clean(case_m.group(1)) if case_m else "",
+                        distress_sources=["Probate"],
+                        distress_count=1,
                     ))
             except Exception as e:
                 logging.debug("Probate page error: %s", e)
@@ -484,6 +617,13 @@ async def scrape_probate() -> list:
 async def scrape_foreclosures() -> list:
     logging.info("Scraping foreclosure notices...")
     records = []
+
+    # Bad owner strings to reject
+    BAD_OWNER = re.compile(
+        r"named above|be required|assert any interest|forever barred|"
+        r"marshalling|proceeds of said sale|have or may have|"
+        r"Judge\s+[A-Z]|Case\s+No|Plaintiff|Defendant", re.I)
+
     try:
         html = await pw_fetch(TLN_FORECLOSURE)
         soup = BeautifulSoup(html, "lxml")
@@ -493,37 +633,100 @@ async def scrape_foreclosures() -> list:
             if "foreclosure" in href and ("case" in href or "ci20" in href.lower()):
                 full = href if href.startswith("http") else TLN_BASE + href
                 if full not in urls: urls.append(full)
+
+        logging.info("Foreclosure URLs found: %d", len(urls))
+
         for url in urls[:55]:
             try:
                 page_html = await pw_fetch(url)
                 if len(page_html) < 500: continue
                 page_soup = BeautifulSoup(page_html, "lxml")
-                text = page_soup.get_text(" ")
-                case_m = re.search(r"Case\s*No\.?\s*(CI\s*\d{4}[-\s]?\d{4,6})", text, re.I)
-                doc_num = clean(case_m.group(1)).replace(" ","") if case_m else ""
-                addr_m = re.search(
-                    r"(\d{3,5}\s+[A-Za-z][A-Za-z\s]+"
-                    r"(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way)\.?)"
-                    r"(?:,?\s*(?:Toledo|Maumee|Sylvania|Oregon|Lucas))", text, re.I)
-                prop_address = clean(addr_m.group(1)) if addr_m else ""
-                owner_m = re.search(
-                    r"(?:Defendant[s]?)[:\s]+([A-Z][A-Za-z\s,\.]+?)"
-                    r"(?:\.|,\s*Et\s*Al|;|\n)", text, re.I)
-                owner = clean(owner_m.group(1)) if owner_m else ""
-                amt_m = re.search(r"\$\s*([\d,]+\.?\d*)", text)
+
+                # Get article body only — avoid sidebar/nav garbage
+                article = page_soup.find("div", class_=re.compile(r"article|content|body|notice", re.I))
+                if not article:
+                    article = page_soup.find("article") or page_soup.find("main") or page_soup
+                text = article.get_text(" ")
+
+                # Case number from URL first, then text
+                case_m = re.search(r"(CI[-\s]?\d{4}[-\s]\d{4,6}|CI\d{7,})", url, re.I)
+                if not case_m:
+                    case_m = re.search(r"Case\s*No\.?\s*(CI[-\s]?\d{4}[-\s]?\d{4,6})", text, re.I)
+                doc_num = re.sub(r"[-\s]", "", clean(case_m.group(1))).upper() if case_m else ""
+
+                # Property address — must appear before "Toledo" or "Lucas County"
+                # Try multiple patterns in order of specificity
+                prop_address = ""
+                addr_patterns = [
+                    # Full address with city
+                    r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Street|Avenue|Drive|Road|Lane|Boulevard|Place|Court|Way|Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)\s*,?\s*(?:Toledo|Maumee|Sylvania|Oregon|Perrysburg|Lucas County)",
+                    # Address followed by Ohio or zip
+                    r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)\s*,?\s*(?:Ohio|OH|4\d{4})",
+                    # Property is/located at
+                    r"(?:property(?:\s+is)?(?:\s+located)?\s+at|premises(?:\s+known\s+as)?)[:\s]+(\d{2,5}\s+[A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)",
+                ]
+                for pat in addr_patterns:
+                    m = re.search(pat, text, re.I)
+                    if m:
+                        prop_address = clean(m.group(1))
+                        # Reject if it looks like courthouse address (247 Gradolph or 700 Adams)
+                        if prop_address.startswith("247 ") or prop_address.startswith("700 Adams"):
+                            prop_address = ""
+                            continue
+                        break
+
+                # Extract city if present after address
+                prop_city = "Toledo"
+                if prop_address:
+                    city_m = re.search(
+                        re.escape(prop_address) + r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                        text, re.I)
+                    if city_m:
+                        prop_city = city_m.group(1).title()
+
+                # Owner — look for Defendant name, reject legal boilerplate
+                owner = ""
+                owner_patterns = [
+                    r"(?:Defendant[s]?\s*(?:is|are)?)[,:\s]+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})",
+                    r"vs\.?\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})\s*(?:,|and|aka|\n)",
+                    r"([A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?),?\s+(?:individually|as\s+(?:heir|executor|trustee))",
+                ]
+                for pat in owner_patterns:
+                    m = re.search(pat, text)
+                    if m:
+                        candidate = clean(m.group(1))
+                        if not BAD_OWNER.search(candidate) and 4 < len(candidate) < 60:
+                            owner = candidate
+                            break
+
+                # Amount — first dollar amount in article
+                amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", text)
                 amount = parse_amount(amt_m.group(1)) if amt_m else None
+
+                # Filed date
                 date_m = re.search(r"filed[:\s]*(\d{1,2}/\d{1,2}/\d{4})", text, re.I)
-                if not date_m: date_m = re.search(r"(\d{4}-\d{2}-\d{2})", url)
+                if not date_m:
+                    date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", text)
                 filed = parse_date(date_m.group(1)) if date_m else ""
-                if not doc_num and not prop_address: continue
+
+                if not doc_num and not prop_address:
+                    continue
+
                 records.append(LeadRecord(
-                    owner=owner, prop_address=prop_address, prop_city="Toledo",
-                    doc_type="Foreclosure", filed=filed, amount=amount,
-                    doc_num=doc_num, clerk_url=url,
-                    flags=["Pre-foreclosure","Lis pendens"],
+                    owner=owner,
+                    prop_address=prop_address,
+                    prop_city=prop_city,
+                    doc_type="Foreclosure",
+                    filed=filed,
+                    amount=amount,
+                    doc_num=doc_num,
+                    clerk_url=url,
+                    flags=["Pre-foreclosure", "Lis pendens"],
+                    distress_sources=["Foreclosure"],
+                    distress_count=1,
                 ))
             except Exception as e:
-                logging.debug("Foreclosure page error: %s", e)
+                logging.debug("Foreclosure page error %s: %s", url[-50:], e)
     except Exception as e:
         logging.warning("Foreclosure scrape failed: %s", e)
     logging.info("Foreclosures: %d", len(records))
