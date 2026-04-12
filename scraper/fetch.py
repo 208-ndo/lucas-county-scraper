@@ -618,11 +618,10 @@ async def scrape_foreclosures() -> list:
     logging.info("Scraping foreclosure notices...")
     records = []
 
-    # Bad owner strings to reject
     BAD_OWNER = re.compile(
         r"named above|be required|assert any interest|forever barred|"
         r"marshalling|proceeds of said sale|have or may have|"
-        r"Judge\s+[A-Z]|Case\s+No|Plaintiff|Defendant", re.I)
+        r"Judge\s+[A-Z]|Case\s+No|Plaintiff|Defendant|unknown heirs", re.I)
 
     try:
         html = await pw_fetch(TLN_FORECLOSURE)
@@ -639,77 +638,59 @@ async def scrape_foreclosures() -> list:
         for url in urls[:55]:
             try:
                 page_html = await pw_fetch(url)
-                if len(page_html) < 500: continue
-                page_soup = BeautifulSoup(page_html, "lxml")
+                # TLN paywall = 218 chars. Skip and just record the case number from URL.
+                is_paywalled = len(page_html) < 500
 
-                # Get article body only — avoid sidebar/nav garbage
-                article = page_soup.find("div", class_=re.compile(r"article|content|body|notice", re.I))
-                if not article:
-                    article = page_soup.find("article") or page_soup.find("main") or page_soup
-                text = article.get_text(" ")
-
-                # Case number from URL first, then text
-                case_m = re.search(r"(CI[-\s]?\d{4}[-\s]\d{4,6}|CI\d{7,})", url, re.I)
-                if not case_m:
-                    case_m = re.search(r"Case\s*No\.?\s*(CI[-\s]?\d{4}[-\s]?\d{4,6})", text, re.I)
+                # Extract case number from URL always
+                case_m = re.search(r"(CI[-\s]?\d{4}[-\s]?\d{4,6}|CI\d{7,})", url, re.I)
                 doc_num = re.sub(r"[-\s]", "", clean(case_m.group(1))).upper() if case_m else ""
 
-                # Property address — must appear before "Toledo" or "Lucas County"
-                # Try multiple patterns in order of specificity
                 prop_address = ""
-                addr_patterns = [
-                    # Full address with city
-                    r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Street|Avenue|Drive|Road|Lane|Boulevard|Place|Court|Way|Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)\s*,?\s*(?:Toledo|Maumee|Sylvania|Oregon|Perrysburg|Lucas County)",
-                    # Address followed by Ohio or zip
-                    r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)\s*,?\s*(?:Ohio|OH|4\d{4})",
-                    # Property is/located at
-                    r"(?:property(?:\s+is)?(?:\s+located)?\s+at|premises(?:\s+known\s+as)?)[:\s]+(\d{2,5}\s+[A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)",
-                ]
-                for pat in addr_patterns:
-                    m = re.search(pat, text, re.I)
-                    if m:
-                        prop_address = clean(m.group(1))
-                        # Reject if it looks like courthouse address (247 Gradolph or 700 Adams)
-                        if prop_address.startswith("247 ") or prop_address.startswith("700 Adams"):
-                            prop_address = ""
-                            continue
-                        break
-
-                # Extract city if present after address
                 prop_city = "Toledo"
-                if prop_address:
-                    city_m = re.search(
-                        re.escape(prop_address) + r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
-                        text, re.I)
-                    if city_m:
-                        prop_city = city_m.group(1).title()
-
-                # Owner — look for Defendant name, reject legal boilerplate
                 owner = ""
-                owner_patterns = [
-                    r"(?:Defendant[s]?\s*(?:is|are)?)[,:\s]+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})",
-                    r"vs\.?\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,4})\s*(?:,|and|aka|\n)",
-                    r"([A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?),?\s+(?:individually|as\s+(?:heir|executor|trustee))",
-                ]
-                for pat in owner_patterns:
-                    m = re.search(pat, text)
-                    if m:
-                        candidate = clean(m.group(1))
-                        if not BAD_OWNER.search(candidate) and 4 < len(candidate) < 60:
-                            owner = candidate
-                            break
+                amount = None
+                filed = ""
 
-                # Amount — first dollar amount in article
-                amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", text)
-                amount = parse_amount(amt_m.group(1)) if amt_m else None
+                if not is_paywalled:
+                    page_soup = BeautifulSoup(page_html, "lxml")
+                    # Try article body first
+                    article = (page_soup.find("div", class_=re.compile(r"article|content|body|notice", re.I))
+                               or page_soup.find("article") or page_soup.find("main") or page_soup)
+                    text = article.get_text(" ")
 
-                # Filed date
-                date_m = re.search(r"filed[:\s]*(\d{1,2}/\d{1,2}/\d{4})", text, re.I)
-                if not date_m:
+                    # Property address patterns
+                    for pat in [
+                        r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Street|Avenue|Drive|Road|Lane|Boulevard|Place|Court|Way|Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                        r"(\d{2,5}\s+[A-Z][A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)\s*,?\s*(?:Ohio|OH|4\d{4})",
+                        r"(?:property(?:\s+is)?(?:\s+located)?\s+at|premises(?:\s+known\s+as)?)[,:\s]+(\d{2,5}\s+[A-Za-z0-9\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)",
+                    ]:
+                        m = re.search(pat, text, re.I)
+                        if m:
+                            candidate = clean(m.group(1))
+                            # Reject courthouse address
+                            if not re.match(r"^(247\s+Gradolph|700\s+Adams)", candidate, re.I):
+                                prop_address = candidate
+                                if len(m.groups()) > 1 and m.group(2):
+                                    prop_city = clean(m.group(2)).title()
+                                break
+
+                    # Owner
+                    for pat in [
+                        r"vs\.?\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})\s*[,\n]",
+                        r"Defendant[s]?[,:\s]+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})",
+                    ]:
+                        m = re.search(pat, text)
+                        if m:
+                            c = clean(m.group(1))
+                            if not BAD_OWNER.search(c) and 4 < len(c) < 60:
+                                owner = c; break
+
+                    amt_m = re.search(r"\$\s*([\d,]+\.?\d{0,2})", text)
+                    amount = parse_amount(amt_m.group(1)) if amt_m else None
                     date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", text)
-                filed = parse_date(date_m.group(1)) if date_m else ""
+                    filed = parse_date(date_m.group(1)) if date_m else ""
 
-                if not doc_num and not prop_address:
+                if not doc_num:
                     continue
 
                 records.append(LeadRecord(
@@ -844,6 +825,9 @@ def write_outputs(records: list, sheriff: list, probate: list,
         write_json(p, meta)
     logging.info("Wrote records.json: %d records", len(all_dicts))
 
+    def wrap(data, label=""):
+        return {"total": len(data), "records": data, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
     for fname, data in [
         ("hot_stack.json",        hot),
         ("sheriff_sales.json",    s_dicts),
@@ -864,7 +848,7 @@ def write_outputs(records: list, sheriff: list, probate: list,
         ("prime_subject_to.json", []),
     ]:
         for p in [DATA_DIR / fname, DASHBOARD_DIR / fname]:
-            write_json(p, data)
+            write_json(p, wrap(data))
 
     csv_path = DATA_DIR / "ghl_export.csv"
     fields = [
