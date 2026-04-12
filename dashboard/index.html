@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lucas County Scraper Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #0b1220;
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+    }
+    .sub {
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .label {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #111827;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #1f2937;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th {
+      background: #0f172a;
+      color: #cbd5e1;
+    }
+    tr:hover {
+      background: #0f172a;
+    }
+    a {
+      color: #60a5fa;
+    }
+    .flags {
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Lucas County Scraper Dashboard</h1>
+    <div class="sub">Motivated seller records</div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="label">Fetched At</div>
+        <div class="value" id="fetchedAt">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Source</div>
+        <div class="value" id="source">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Total Records</div>
+        <div class="value" id="total">0</div>
+      </div>
+      <div class="card">
+        <div class="label">With Address</div>
+        <div class="value" id="withAddress">0</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px;">
+      <div class="label">Date Range</div>
+      <div class="value" id="dateRange">-</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Filed</th>
+          <th>Lead Type</th>
+          <th>Owner</th>
+          <th>Property Address</th>
+          <th>Mailing Address</th>
+          <th>Amount</th>
+          <th>Score</th>
+          <th>Flags</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="recordsBody">
+        <tr>
+          <td colspan="9">Loading...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    async function loadData() {
+      try {
+        const res = await fetch("./records.json");
+        const data = await res.json();
+
+        document.getElementById("fetchedAt").textContent = data.fetched_at || "-";
+        document.getElementById("source").textContent = data.source || "-";
+        document.getElementById("total").textContent = data.total ?? 0;
+        document.getElementById("withAddress").textContent = data.with_address ?? 0;
+
+        const from = data.date_range?.from || "-";
+        const to = data.date_range?.to || "-";
+        document.getElementById("dateRange").textContent = `${from} to ${to}`;
+
+        const tbody = document.getElementById("recordsBody");
+        tbody.innerHTML = "";
+
+        if (!data.records || data.records.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="9">No records yet</td></tr>`;
+          return;
+        }
+
+        for (const r of data.records) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${r.filed || ""}</td>
+            <td>${r.cat_label || ""}</td>
+            <td>${r.owner || ""}</td>
+            <td>${[r.prop_address, r.prop_city, r.prop_state, r.prop_zip].filter(Boolean).join(", ")}</td>
+            <td>${[r.mail_address, r.mail_city, r.mail_state, r.mail_zip].filter(Boolean).join(", ")}</td>
+            <td>${r.amount ?? ""}</td>
+            <td>${r.score ?? ""}</td>
+            <td class="flags">${(r.flags || []).join(", ")}</td>
+            <td>${r.clerk_url ? `<a href="${r.clerk_url}" target="_blank">Open</a>` : ""}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+      } catch (err) {
+        document.getElementById("recordsBody").innerHTML =
+          `<tr><td colspan="9">Failed to load records.json</td></tr>`;
+        console.error(err);
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
