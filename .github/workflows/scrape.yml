@@ -1,47 +1,77 @@
-name: Summit County Scraper
+name: Lucas County Scraper
 
 on:
   schedule:
-    - cron: '0 7 * * *'   # 7am UTC = 3am ET daily
-  workflow_dispatch:
+    - cron: "0 13 * * *"   # 8 AM EST daily
+  workflow_dispatch:         # manual trigger anytime
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   scrape:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install Python packages
-        run: pip install requests beautifulsoup4 lxml playwright
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('scraper/requirements.txt') }}
 
-      - name: Install Playwright Chromium
-        run: python -m playwright install --with-deps chromium
-
-      - name: Run scraper
-        run: python scraper/fetch.py
-
-      - name: Commit updated data files
+      - name: Install dependencies
         run: |
-          git config user.name "github-actions[bot]"
+          pip install --upgrade pip
+          pip install -r scraper/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run Toledo scraper
+        run: python scraper/fetch.py
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Commit and push data
+        run: |
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/ dashboard/
-          git diff --staged --quiet || git commit -m "Update scraper data $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git diff --cached --quiet || git commit -m "Data update $(date -u '+%Y-%m-%d %H:%M UTC') - $(python -c "import json,pathlib; d=json.loads(pathlib.Path('data/records.json').read_text()); print(f\"{d['total']} leads\")")"
           git push
 
-      - name: Deploy dashboard to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+  deploy:
+    needs: scrape
+    runs-on: ubuntu-22.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dashboard
-          publish_branch: gh-pages
+          ref: main
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
