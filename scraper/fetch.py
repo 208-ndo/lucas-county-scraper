@@ -760,24 +760,176 @@ async def scrape_foreclosures() -> list:
     logging.info("Foreclosures: %d", len(records))
     return records
 
+async def scrape_sheriff_sales() -> list:
+    """Lucas County Sheriff foreclosure app — public, free, has addresses."""
+    logging.info("Scraping sheriff sales via Lucas County Sheriff app...")
+    records = []
+
+    SHERIFF_APP   = "http://lcapps.co.lucas.oh.us/foreclosure/search.aspx"
+    SHERIFF_PAGE  = "https://lucassheriff.org/resources/sheriffs-sales"
+    REALAUCTION   = "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=USER&zmethod=CALENDAR"
+
+    async def parse_sheriff_html(html: str, url: str):
+        recs = []
+        soup = BeautifulSoup(html, "lxml")
+        text = soup.get_text(" ")
+        # Match: CI2025-XXXXX ... address ... city
+        entries = re.split(r"\b(CI\d{4}[-\s]?\d{4,6}|TF\d{4}[-\s]?\d{4,6})\b", text)
+        for i in range(1, len(entries), 2):
+            case_raw = entries[i]
+            rest = entries[i+1] if i+1 < len(entries) else ""
+            doc_num = re.sub(r"[-\s]", "", case_raw).upper()
+            # Address
+            addr_m = re.search(
+                r"(\d{2,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)"
+                r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                rest, re.I)
+            if not addr_m: continue
+            prop_address = clean(addr_m.group(1))
+            prop_city = clean(addr_m.group(2)).title()
+            amt_m = re.search(r"(?:Appraised|appraised)[:\s]+\$\s*([\d,]+)", rest, re.I)
+            amount = parse_amount(amt_m.group(1)) if amt_m else None
+            date_m = re.search(r"(\d{1,2}/\d{1,2}/202[3-9])", rest)
+            sale_date = parse_date(date_m.group(1)) if date_m else ""
+            parcel_m = re.search(r"Parcel\s+(?:no\.?|#)?\s*([\d\-]+)", rest, re.I)
+            owner_m = re.search(r"vs[.\s]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})", rest)
+            recs.append(LeadRecord(
+                owner=clean(owner_m.group(1)) if owner_m else "",
+                prop_address=prop_address,
+                prop_city=prop_city,
+                doc_type="Sheriff Sale",
+                filed=sale_date,
+                amount=amount,
+                doc_num=doc_num,
+                clerk_url=url,
+                parcel_id=clean(parcel_m.group(1)) if parcel_m else "",
+                score=100,
+                flags=["Sheriff sale scheduled", "Pre-foreclosure", "Hot Stack"],
+                hot_stack=True,
+                distress_sources=["Sheriff Sale"],
+                distress_count=1,
+            ))
+        return recs
+
+    for url in [SHERIFF_APP, SHERIFF_PAGE, REALAUCTION]:
+        try:
+            html = await pw_fetch(url)
+            if len(html) < 500: continue
+            recs = await parse_sheriff_html(html, url)
+            records.extend(recs)
+            logging.info("Sheriff %s: %d records", url[:60], len(recs))
+            if records: break
+        except Exception as e:
+            logging.debug("Sheriff %s failed: %s", url[:60], e)
+
+    logging.info("Sheriff sales total: %d", len(records))
+    return records
+
+
+async def scrape_code_violations() -> list:
+    """Scrape Toledo code violations, nuisance, and vacant property lists."""
+    logging.info("Scraping code violations & vacant properties...")
+    records = []
+
+    SOURCES = [
+        # Lucas County Land Bank — distressed vacant/blighted properties for sale
+        ("https://lucascountylandbank.org/available-properties/", "Land Bank"),
+        # Toledo Engage 311 open data
+        ("https://toledo.oh.gov/residents/neighborhoods/revitalization/vacant-lots-buildings", "Vacant Registry"),
+        # Toledo demolition list
+        ("https://toledo.oh.gov/residents/neighborhoods/revitalization/code-violations-guide-2", "Code Violations"),
+    ]
+
+    for url, label in SOURCES:
+        try:
+            html = await pw_fetch(url)
+            if len(html) < 300: continue
+            soup = BeautifulSoup(html, "lxml")
+            text = soup.get_text(" ")
+            addr_matches = re.findall(
+                r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)"
+                r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                text, re.I)
+            for addr, city in addr_matches[:30]:
+                records.append(LeadRecord(
+                    prop_address=clean(addr),
+                    prop_city=clean(city).title(),
+                    doc_type="Code Violation",
+                    flags=["Code violation", "Nuisance property", label],
+                    clerk_url=url,
+                    distress_sources=["Code Violation"],
+                    distress_count=1,
+                ))
+            logging.info("Code violations %s: %d", label, len(addr_matches))
+        except Exception as e:
+            logging.warning("Code violations %s failed: %s", label, e)
+
+    logging.info("Code violations total: %d", len(records))
+    return records
+
+
 async def scrape_tax_delinquent() -> list:
+    """Scrape tax delinquent from Treasurer + Forfeited Land + Sheriff Tax Sales."""
     logging.info("Scraping tax delinquent...")
     records = []
-    try:
-        page_html = await pw_fetch(TREASURER_URL)
-        page_soup = BeautifulSoup(page_html, "lxml")
-        page_text = page_soup.get_text(" ")
-        addr_matches = re.findall(
-            r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd)\.?)"
-            r"\s*(?:Toledo|Maumee|Lucas)", page_text, re.I)
-        for addr in addr_matches[:50]:
-            records.append(LeadRecord(
-                prop_address=clean(addr), prop_city="Toledo",
-                doc_type="Tax Delinquent",
-                flags=["Tax delinquent"], clerk_url=TREASURER_URL,
-            ))
-    except Exception as e:
-        logging.warning("Tax delinquent scrape failed: %s", e)
+
+    SOURCES = [
+        "https://www.lucascountytreasurer.org/delinquent-taxes",
+        "https://www.lucascountytreasurer.org/sheriff-sales",
+        "https://co.lucas.oh.us/2949/Forfeited-Land-Sale",
+    ]
+
+    for url in SOURCES:
+        try:
+            html = await pw_fetch(url)
+            if len(html) < 300: continue
+            soup = BeautifulSoup(html, "lxml")
+            text = soup.get_text(" ")
+
+            addr_matches = re.findall(
+                r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct|Way)\.?)"
+                r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon|Perrysburg)",
+                text, re.I)
+            for addr, city in addr_matches[:50]:
+                records.append(LeadRecord(
+                    prop_address=clean(addr),
+                    prop_city=clean(city).title(),
+                    doc_type="Tax Delinquent",
+                    flags=["Tax delinquent"],
+                    clerk_url=url,
+                    distress_sources=["Tax Delinquent"],
+                    distress_count=1,
+                ))
+
+            # Follow links to sub-pages/lists
+            for a in soup.find_all("a", href=True):
+                href = a.get("href", "")
+                link_text = a.get_text().lower()
+                if any(k in link_text or k in href.lower()
+                       for k in ["delinquent", "forfeited", "tax sale", "lien"]):
+                    full_url = href if href.startswith("http") else "https://www.lucascountytreasurer.org" + href
+                    try:
+                        link_html = await pw_fetch(full_url)
+                        if len(link_html) < 300: continue
+                        link_soup = BeautifulSoup(link_html, "lxml")
+                        link_text = link_soup.get_text(" ")
+                        for m in re.finditer(
+                            r"(\d{3,5}\s+[A-Z][A-Za-z\s]+(?:Blvd|Ave|St|Dr|Rd|Ln|Pl|Ct)\.?)"
+                            r"\s*,?\s*(Toledo|Maumee|Sylvania|Oregon)",
+                            link_text, re.I):
+                            records.append(LeadRecord(
+                                prop_address=clean(m.group(1)),
+                                prop_city=clean(m.group(2)).title(),
+                                doc_type="Tax Delinquent",
+                                flags=["Tax delinquent"],
+                                clerk_url=full_url,
+                                distress_sources=["Tax Delinquent"],
+                                distress_count=1,
+                            ))
+                    except: pass
+        except Exception as e:
+            logging.warning("Tax delinquent %s failed: %s", url[:50], e)
+
     logging.info("Tax delinquent: %d", len(records))
     return records
 
@@ -829,7 +981,7 @@ def tag_new_this_week(records: list) -> list:
     return records
 
 def write_outputs(records: list, sheriff: list, probate: list,
-                  tax_delinquent: list, foreclosures: list):
+                  tax_delinquent: list, foreclosures: list, code_violations: list = None):
 
     def to_dict(r):
         d = asdict(r)
@@ -846,6 +998,7 @@ def write_outputs(records: list, sheriff: list, probate: list,
     oos       = [d for d in all_dicts if d.get("is_out_of_state")]
     vacant    = [d for d in all_dicts if d.get("is_vacant_land")]
     inherited = [d for d in all_dicts if d.get("is_inherited")]
+    code_viol = [to_dict(r) for r in (code_violations or [])]
     liens     = [d for d in all_dicts if "lien" in d.get("doc_type","").lower()]
     divorces  = [d for d in all_dicts if "divorce" in d.get("doc_type","").lower()]
 
@@ -863,7 +1016,7 @@ def write_outputs(records: list, sheriff: list, probate: list,
         "vacant_land_count":    len(vacant),
         "inherited_count":      len(inherited),
         "liens_count":          len(liens),
-        "code_violation_count": 0,
+        "code_violation_count": len(code_viol),
         "vacant_home_count":    0,
         "subject_to_count":     0,
         "records":              all_dicts,
@@ -889,7 +1042,7 @@ def write_outputs(records: list, sheriff: list, probate: list,
         ("divorces.json",         divorces),
         ("subject_to.json",       []),
         ("bankruptcy.json",       []),
-        ("code_violations.json",  []),
+        ("code_violations.json",  code_viol),
         ("vacant_homes.json",     []),
         ("evictions.json",        []),
         ("prime_subject_to.json", []),
@@ -977,14 +1130,16 @@ async def main():
     pr_task = asyncio.create_task(scrape_probate())
     fc_task = asyncio.create_task(scrape_foreclosures())
     td_task = asyncio.create_task(scrape_tax_delinquent())
+    cv_task = asyncio.create_task(scrape_code_violations())
 
     cp_records = await cp_task
     sh_records = await sh_task
     pr_records = await pr_task
     fc_records = await fc_task
     td_records = await td_task
+    cv_records = await cv_task
 
-    all_records = cp_records + sh_records + pr_records + fc_records + td_records
+    all_records = cp_records + sh_records + pr_records + fc_records + td_records + cv_records
     logging.info("Total before enrich: %d", len(all_records))
 
     all_records = enrich_with_areis(all_records)
@@ -1001,7 +1156,7 @@ async def main():
 
     all_records.sort(key=lambda r: (r.hot_stack, r.distress_count, r.score), reverse=True)
 
-    write_outputs(all_records, sh_records, pr_records, td_records, fc_records)
+    write_outputs(all_records, sh_records, pr_records, td_records, fc_records, cv_records)
 
 if __name__ == "__main__":
     asyncio.run(main())
