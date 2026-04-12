@@ -1,32 +1,29 @@
-name: Scrape Lucas County Leads
+name: Summit County Scraper
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 7 * * *"
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+    - cron: '0 7 * * *'   # 7am UTC = 3am ET daily
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml dbfread playwright
+      - name: Install Python packages
+        run: pip install requests beautifulsoup4 lxml playwright
 
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
@@ -34,28 +31,17 @@ jobs:
       - name: Run scraper
         run: python scraper/fetch.py
 
-      - name: Commit results
+      - name: Commit updated data files
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dashboard/records.json data/records.json || true
-          git commit -m "Update records" || echo "No changes to commit"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ dashboard/
+          git diff --staged --quiet || git commit -m "Update scraper data $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
 
-  deploy-pages:
-    needs: scrape
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy dashboard to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: dashboard
-
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dashboard
+          publish_branch: gh-pages
