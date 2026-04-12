@@ -38,17 +38,17 @@ OH_APPRECIATION = 0.04
 
 # ── URLs ──────────────────────────────────────────────────────────────────
 TLN_BASE              = "https://www.toledolegalnews.com"
-TLN_SHERIFF_URL       = "https://www.toledolegalnews.com/legal_notices/sherrif_sales_lucas/"
+TLN_SHERIFF_URL       = "https://www.toledolegalnews.com/legal_notices/foreclosure_sherrif_sales_lucas/"
 TLN_TAX_SHERIFF_URL   = "https://www.toledolegalnews.com/legal_notices/tax_sherrif_sales/"
-TLN_FORECLOSURES_URL  = "https://www.toledolegalnews.com/legal_notices/notice_of_foreclosure_complaints/"
+TLN_FORECLOSURES_URL  = "https://www.toledolegalnews.com/legal_notices/foreclosures/"
 TLN_LIENS_URL         = "https://www.toledolegalnews.com/liens/"
 TLN_LIEN_MECH_URL     = "https://www.toledolegalnews.com/liens/mechanics/"
 TLN_LIEN_TAX_URL      = "https://www.toledolegalnews.com/liens/us_tax/"
 TLN_LIEN_CHILD_URL    = "https://www.toledolegalnews.com/liens/child_support/"
 TLN_LIEN_COURT_URL    = "https://www.toledolegalnews.com/liens/lucas_county_commonpleas_court/"
-TLN_COMMON_PLEAS_URL  = "https://www.toledolegalnews.com/courts/common_pleas_court_of_lucas_county/"
-TLN_PROBATE_URL       = "https://www.toledolegalnews.com/courts/probate_court_of_lucas_county/"
-TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_court_of_lucas_county/"
+TLN_COMMON_PLEAS_URL  = "https://www.toledolegalnews.com/courts/common_pleas/"
+TLN_PROBATE_URL       = "https://www.toledolegalnews.com/courts/probate/"
+TLN_DOMESTIC_URL      = "https://www.toledolegalnews.com/courts/domestic_relations/"
 TLN_DIVORCE_URL       = "https://www.toledolegalnews.com/legal_notices/divorce/"
 
 # Parcel data — Toledo open data hub (GeoJSON with owner/address/value)
@@ -406,13 +406,14 @@ def load_parcel_data()->Dict[str,dict]:
     try:
         logging.info("Loading Toledo parcel data...")
         # Try Socrata API — data.toledo.gov uses this format
+        # First — discover what layers are available on the GIS server
         socrata_urls=[
-            # Lucas County GIS - parcel layer with owner/address info
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/0/query?where=1%3D1&outFields=PARCEL_ID,OWNER,SITE_ADDR,SITE_CITY,SITE_ZIP,MAIL_ADDR,MAIL_CITY,MAIL_STATE,MAIL_ZIP,APPRTOT,LUC&f=json&resultRecordCount=50000&resultOffset=0",
-            # Toledo open data parcels
-            "https://data.toledo.gov/resource/k95c-9tfe.json?$limit=200000",
-            # Alternative GIS layer
-            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/9/query?where=1%3D1&outFields=*&f=json&resultRecordCount=1000",
+            # Lucas County Auditor GIS — try layer 0 (parcels with owner data)
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/0/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            # Try layer 1
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer/1/query?where=1%3D1&outFields=*&f=json&resultRecordCount=100",
+            # Try AREIS export via direct API
+            "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer?f=json",
         ]
         resp=None
         data_json=None
@@ -732,33 +733,115 @@ async def scrape_tln_liens()->List[LeadRecord]:
     return recs
 
 async def scrape_tln_common_pleas()->List[LeadRecord]:
-    """Scrape Toledo Legal News Common Pleas daily filings for LP, foreclosure, liens."""
+    """
+    Scrape Toledo Legal News Common Pleas daily filings.
+    The goldmine: foreclosures, liens, judgments all in plain text.
+    Format: CI2026XXXXX Plaintiff vs Defendant. Action for $X foreclosure of mtg on ADDRESS
+    """
     records:List[LeadRecord]=[]
     try:
         logging.info("Scraping Common Pleas filings...")
+        # Get the index page to find article links
         html=await pw_get_html(TLN_COMMON_PLEAS_URL)
         soup=BeautifulSoup(html,"lxml")
-        # Find links to recent daily filing pages
+        save_debug_text("common_pleas_index.html",html[:5000])
+        logging.info("Common Pleas index: %s chars",len(html))
+
+        # Find article links — TLN article URLs contain "article_" or "common-pleas-filings"
         links=[]
         for a in soup.select("a[href]"):
             href=clean_text(a.get("href",""))
-            # Skip social share / mailto / external links
-            if any(x in href for x in ["facebook","twitter","mailto","linkedin","utm_source"]):
-                continue
-            if "common_pleas" in href and ("filings" in href or "received" in href or "article" in href):
-                if href.startswith("http"):
-                    full=href
-                else:
-                    full=requests.compat.urljoin(TLN_BASE,href)
-                if full not in links and "toledolegalnews.com" in full:
+            if not href or any(x in href for x in ["facebook","twitter","mailto","#","utm_"]):continue
+            if any(x in href for x in ["article_","filings-received","common-pleas","common_pleas"]):
+                full=href if href.startswith("http") else requests.compat.urljoin(TLN_BASE,href)
+                if "toledolegalnews.com" in full and full not in links:
                     links.append(full)
-        logging.info("Common Pleas daily filing pages: %s",len(links))
-        for url in links[:7]:  # last 7 days
+        logging.info("Common Pleas article links found: %s",len(links))
+
+        # Also build date-based URLs for last 7 days (most reliable)
+        from datetime import datetime,timedelta
+        for days_back in range(0,8):
+            d=(datetime.now()-timedelta(days=days_back)).strftime("%B-%-d-%Y").lower()
+            url=f"{TLN_BASE}/courts/common_pleas/common-pleas-filings-received-on-{d}/"
+            if url not in links:links.append(url)
+
+        logging.info("Total CP URLs to scrape: %s",len(links))
+
+        seen_docs=set()
+        for url in links[:12]:
             try:
-                r=await scrape_tln_page(url)
-                records.extend(r)
+                html=await pw_get_html(url,wait_ms=2000)
+                if not html or len(html)<500:continue
+                soup2=BeautifulSoup(html,"lxml")
+                text=soup2.get_text(" ")
+                if "404" in text[:200] or "not found" in text[:200].lower():continue
+                save_debug_text("common_pleas_article.html",html[:8000])
+                logging.info("CP article %s: %s chars",url[-50:],len(html))
+
+                # Pattern: "CI2026XXXXX Plaintiff vs Defendant. Action for $X foreclosure of mtg on ADDRESS"
+                # Foreclosure
+                fc_pat=re.compile(
+                    r"(CI[0-9]{4}[0-9]+)\s+(.{5,60}?)\s+vs\s+(.{5,60}?)\."
+                    r".*?foreclosure of mtg on\s+([0-9]{1,5}\s+\w[\w\s]{3,30}),"
+                    r"\s*([\w\s]+),\s*Ohio\s*([0-9]{5})?",
+                    re.IGNORECASE|re.DOTALL)
+                for m in fc_pat.finditer(text):
+                    try:
+                        doc_num=clean_text(m.group(1))
+                        if doc_num in seen_docs:continue
+                        seen_docs.add(doc_num)
+                        plaintiff=clean_text(m.group(2))
+                        defendant=clean_text(m.group(3))
+                        prop_address=clean_text(m.group(4)).title()
+                        prop_city=clean_text(m.group(5)).title()
+                        prop_zip=clean_text(m.group(6)) if m.group(6) else ""
+                        # Extract amount
+                        amt_m=re.search(r"\$\s*([\d,]+(?:\.\d{2})?)",text[m.start():m.start()+300])
+                        amt=parse_amount(amt_m.group(1)) if amt_m else None
+                        filed=try_parse_date(text[max(0,m.start()-200):m.start()+50]) or datetime.now().date().isoformat()
+                        rec=LeadRecord(
+                            doc_num=doc_num,doc_type="NOFC",filed=filed,
+                            cat="NOFC",cat_label="Pre-foreclosure",
+                            owner=defendant,grantee=plaintiff,amount=amt,
+                            prop_address=prop_address,prop_city=prop_city,
+                            prop_state="OH",prop_zip=prop_zip,
+                            clerk_url=url,
+                            flags=["Pre-foreclosure","Lis pendens"],
+                            distress_sources=["foreclosure","lis_pendens"],
+                        )
+                        rec=estimate_mortgage_data(rec);rec.score=score_record(rec)
+                        records.append(rec)
+                    except:continue
+
+                # Pattern: LN liens — "LN2025-20036; STATE OF OHIO vs OWNER NAME"
+                ln_pat=re.compile(
+                    r"(LN[0-9]{4}[0-9\-]+)[;,]\s*([^;,\n]+?)\s+vs\s+([^;,\n\.]{3,60}?)(?:[;,]|AMOUNT|\$|$)",
+                    re.IGNORECASE)
+                for m in ln_pat.finditer(text):
+                    try:
+                        doc_num=clean_text(m.group(1))
+                        if doc_num in seen_docs:continue
+                        seen_docs.add(doc_num)
+                        plaintiff=clean_text(m.group(2))
+                        owner=clean_text(m.group(3)).title()
+                        if not owner or len(owner)<3:continue
+                        filed=try_parse_date(text[max(0,m.start()-200):m.start()+50]) or datetime.now().date().isoformat()
+                        dt="LNFED" if "OHIO DEPT" in plaintiff.upper() or "TAXATION" in plaintiff.upper() else "LN"
+                        rec=LeadRecord(
+                            doc_num=doc_num,doc_type=dt,filed=filed,
+                            cat=dt,cat_label=LEAD_TYPE_MAP.get(dt,dt),
+                            owner=owner,grantee=plaintiff,
+                            clerk_url=url,
+                            flags=category_flags(dt,owner),
+                            distress_sources=[s for s in [classify_distress_source(dt)] if s],
+                        )
+                        rec=estimate_mortgage_data(rec);rec.score=score_record(rec)
+                        records.append(rec)
+                    except:continue
+
             except Exception as e:
-                logging.warning("Common Pleas page %s: %s",url,e)
+                logging.warning("CP article %s: %s",url[-50:],e)
+
         logging.info("Common Pleas leads: %s",len(records))
     except Exception as e:logging.warning("Common Pleas failed: %s",e)
     return records
