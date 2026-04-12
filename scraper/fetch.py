@@ -21,20 +21,18 @@ SOURCE_NAME = f"{COUNTY_NAME} County, {STATE}"
 DATA_DIR = Path("data")
 DASHBOARD_DIR = Path("dashboard")
 
+# URLs - Updated for better stability
 TLN_BASE = "https://www.toledolegalnews.com"
 TLN_PROBATE = f"{TLN_BASE}/courts/probate/"
 TLN_FORECLOSURE = f"{TLN_BASE}/legal_notices/foreclosures/"
-SHERIFF_URL = "https://lucassheriff.org/resources/sheriffs-sales"
-CODE_VIOL_URL = "https://toledo.oh.gov/residents/neighborhoods/revitalization/vacant-lots-buildings"
-TAX_DELINQ_URL = "https://co.lucas.oh.us/2949/Forfeited-Land-Sale"
+# Using .gov or .co.lucas.oh.us is more stable than .org
+SHERIFF_URL = "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=USER&zmethod=CALENDAR"
+TAX_URL = "https://co.lucas.oh.us/2949/Forfeited-Land-Sale"
+CODE_URL = "https://toledo.oh.gov/residents/neighborhoods/revitalization/vacant-lots-buildings"
 ARCGIS_API_URL = "https://services2.arcgis.com/ziRJBiSjXODrMVP5/arcgis/rest/services/Ohio_Statewide_Parcel_Data/FeatureServer/0/query"
 
-# WORDS TO DELETE (Trash Filter)
-BLACKLIST = [
-    "agreed", "required", "filed as", "notice", "state of", "bureau", 
-    "answer within", "claims to have", "unknown heirs", "devisees",
-    "civil order", "protection", "defendant", "Defendants", "et al"
-]
+# Trash Filter
+BLACKLIST = ["agreed", "required", "filed as", "notice", "state of", "bureau", "answer within", "claims to have", "unknown heirs", "devisees", "civil order", "protection"]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,14 +58,13 @@ class LeadRecord:
     score: int = 0
 
 # ==========================================
-# HELPERS: Cleaning & ArcGIS
+# HELPERS
 # ==========================================
 def is_trash_name(name: str) -> bool:
-    """Returns True if the name is actually a sentence fragment or institution."""
     if not name: return True
     name_low = name.lower()
     if any(word in name_low for word in BLACKLIST): return True
-    if len(name.split()) > 6: return True # Too long to be a name
+    if len(name.split()) > 6: return True 
     return False
 
 def enrich_address_via_arcgis(owner_name: str) -> Optional[dict]:
@@ -97,72 +94,65 @@ def enrich_address_via_arcgis(owner_name: str) -> Optional[dict]:
     return None
 
 # ==========================================
-# DEEP SCRAPING LOGIC
+# SCRAPERS
 # ==========================================
-def extract_info_from_text(text: str):
-    case_match = re.search(r"(CI\d{4}[-\s]?\d{4,6})", text, re.I)
-    doc_num = case_match.group(1) if case_match else ""
 
-    owner = ""
-    owner_patterns = [
-        r"vs\.?\s+([A-Z][a-zA-Z\s\.,]{3,40})(?=\s+[\n\r]|$)", 
-        r"Defendant\s*[:\s]+([A-Z][a-zA-Z\s\.,]{3,40})",
-        r"Estate\s+of\s+([A-Z][a-zA-Z\s\.,]{3,40})"
-    ]
-    for pat in owner_patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            owner = m.group(1).strip()
-            break
-
-    addr_match = re.search(r"(\d+\s+[A-Z][a-zA-Z\s]+(?:St|Ave|Dr|Rd|Ln|Blvd|Pl|Ct|Way)[^,\n]*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s*\d{5})", text)
-    prop_address = addr_match.group(1) if addr_match else ""
-
-    return doc_num, owner, prop_address
-
-async def scrape_source(page, url, dtype, flags):
+# 1. DEEP TLN SCRAPER (Using Playwright)
+async def scrape_tln_deep(page):
     leads = []
-    logger.info(f"Scraping {dtype} source...")
+    sources = [(TLN_FORECLOSURE, "Foreclosure", ["Pre-foreclosure"]), (TLN_PROBATE, "Probate", ["Inherited"])]
+    for url, dtype, flags in sources:
+        logger.info(f"Diving deep into {dtype}...")
+        try:
+            await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+            content = await page.content()
+            soup = BeautifulSoup(content, "html.parser")
+            links = [a['href'] for a in soup.find_all("a", href=True) if "article" in a['href'].lower() and "facebook" not in a['href'].lower()]
+            for link in links[:40]:
+                try:
+                    full_url = link if link.startswith("http") else TLN_BASE + link
+                    await page.goto(full_url, timeout=30000, wait_until="domcontentloaded")
+                    text = await page.inner_text("body")
+                    
+                    # Extract Name
+                    owner = ""
+                    for pat in [r"vs\.?\s+([A-Z][a-zA-Z\s\.,]{3,40})", r"Defendant\s*[:\s]+([A-Z][a-zA-Z\s\.,]{3,40})"]:
+                        m = re.search(pat, text, re.I)
+                        if m: owner = m.group(1).strip(); break
+                    
+                    if owner and not is_trash_name(owner):
+                        lead = LeadRecord(doc_type=dtype, owner=owner, clerk_url=full_url, flags=flags)
+                        addr = enrich_address_via_arcgis(owner)
+                        if addr:
+                            lead.prop_address, lead.prop_city, lead.prop_zip = addr['prop_address'], addr['prop_city'], addr['prop_zip']
+                        leads.append(lead)
+                except: pass
+        except Exception as e: logger.error(f"TLN Error: {e}")
+    return leads
+
+# 2. STATIC SCRAPER (Using Requests - Much more stable for Gov sites)
+def scrape_static_source(url, dtype, flags):
+    leads = []
+    logger.info(f"Scanning {dtype} via static request...")
     try:
-        await page.goto(url, timeout=60000)
-        content = await page.content()
-        soup = BeautifulSoup(content, "html.parser")
+        response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(" ")
         
-        links = []
-        for a in soup.find_all("a", href=True):
-            href = a['href']
-            if any(x in href.lower() for x in ["article", "case-no", "ci20"]) and \
-               not any(x in href.lower() for x in ["facebook", "twitter", "whatsapp", "email", "share"]):
-                full_url = href if href.startswith("http") else TLN_BASE + href
-                if full_url not in links: links.append(full_url)
-        
-        for link in links[:50]: # Limit to top 50 per category for speed
-            try:
-                await page.goto(link, timeout=30000)
-                text = await page.inner_text("body")
-                doc_num, owner, address = extract_info_from_text(text)
-                
-                if owner and not is_trash_name(owner):
-                    lead = LeadRecord(doc_num=doc_num, doc_type=dtype, owner=owner, prop_address=address, clerk_url=link, flags=flags)
-                    # ArcGIS Address lookup
-                    if not address:
-                        addr_data = enrich_address_via_arcgis(owner)
-                        if addr_data:
-                            lead.prop_address = addr_data['prop_address']
-                            lead.prop_city = addr_data['prop_city']
-                            lead.prop_zip = addr_data['prop_zip']
-                            lead.mail_address = addr_data['mail_address']
-                            lead.mail_city = addr_data['mail_city']
-                            lead.mail_zip = addr_data['mail_zip']
-                            lead.parcel_id = addr_data['parcel_id']
-                    leads.append(lead)
-            except: pass
-    except Exception as e:
-        logger.error(f"Error scraping {dtype}: {e}")
+        # Simple Regex to find Names in lists
+        names = re.findall(r"([A-Z][a-z]+ [A-Z][a-z]+(?: [A-Z][a-z]+)?)", text)
+        for name in list(set(names))[:30]:
+            if not is_trash_name(name):
+                lead = LeadRecord(doc_type=dtype, owner=name, flags=flags)
+                addr = enrich_address_via_arcgis(name)
+                if addr:
+                    lead.prop_address, lead.prop_city, lead.prop_zip = addr['prop_address'], addr['prop_city'], addr['prop_zip']
+                leads.append(lead)
+    except Exception as e: logger.error(f"Static Error {dtype}: {e}")
     return leads
 
 # ==========================================
-# OUTPUTS
+# MAIN & OUTPUT
 # ==========================================
 def safe_save(leads: List[LeadRecord]):
     if not leads:
@@ -170,13 +160,8 @@ def safe_save(leads: List[LeadRecord]):
         return
     DASHBOARD_DIR.mkdir(exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
-    output = {
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source": SOURCE_NAME,
-        "total": len(leads),
-        "with_address": len([l for l in leads if l.prop_address]),
-        "records": [asdict(l) for l in leads]
-    }
+    output = {"fetched_at": datetime.now(timezone.utc).isoformat(), "source": SOURCE_NAME, "total": len(leads), 
+              "with_address": len([l for l in leads if l.prop_address]), "records": [asdict(l) for l in leads]}
     with open(DASHBOARD_DIR / "records.json", "w") as f: json.dump(output, f, indent=2)
     with open(DATA_DIR / "records.json", "w") as f: json.dump(output, f, indent=2)
 
@@ -185,23 +170,16 @@ async def main():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
-        # STARTING ALL CATEGORIES TO FILL THE RED CIRCLES
         all_leads = []
-        
-        # 1. Foreclosures
-        all_leads += await scrape_source(page, TLN_FORECLOSURE, "Foreclosure", ["Pre-foreclosure"])
-        # 2. Probate
-        all_leads += await scrape_source(page, TLN_PROBATE, "Probate", ["Inherited"])
-        # 3. Sheriff Sales
-        all_leads += await scrape_source(page, SHERIFF_URL, "Sheriff Sale", ["Sheriff Sale", "Hot Stack"])
-        # 4. Code Violations
-        all_leads += await scrape_source(page, CODE_VIOL_URL, "Code Violation", ["Nuisance", "Vacant"])
-        # 5. Tax Delinquent
-        all_leads += await scrape_source(page, TAX_DELINQ_URL, "Tax Delinquent", ["Tax Lien", "Hot Stack"])
+        # HYBRID APPROACH
+        all_leads += await scrape_tln_deep(page) # Deep Dive (Playwright)
+        all_leads += scrape_static_source(SHERIFF_URL, "Sheriff Sale", ["Sheriff Sale"]) # Static (Requests)
+        all_leads += scrape_static_source(TAX_URL, "Tax Delinquent", ["Tax Lien"]) # Static (Requests)
+        all_leads += scrape_static_source(CODE_URL, "Code Violation", ["Nuisance"]) # Static (Requests)
         
         await browser.close()
         safe_save(all_leads)
-        logger.info(f"DONE: Processed {len(all_leads)} clean leads across all categories.")
+        logger.info(f"DONE: Processed {len(all_leads)} clean leads.")
 
 if __name__ == "__main__":
     asyncio.run(main())
