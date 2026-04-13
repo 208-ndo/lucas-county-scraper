@@ -1,18 +1,14 @@
 name: Lucas County Scraper
-
 on:
   schedule:
     - cron: "0 13 * * *"   # 8 AM EST daily
   workflow_dispatch:         # manual trigger anytime
-
 permissions:
   contents: write
-
 jobs:
   scrape-and-deploy:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
-
+    timeout-minutes: 60
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -28,13 +24,62 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r scraper/requirements.txt
+          pip install dbfread
           python -m playwright install --with-deps chromium
 
+      - name: Download ParcelsAddress DBF from Lucas County Open Data
+        run: |
+          mkdir -p data/parcels
+          python - <<'PYEOF'
+          import requests, zipfile, io, os, shutil, sys
+          from pathlib import Path
+
+          dest = Path("data/parcels/ParcelsAddress.dbf")
+
+          # Lucas County Open Data Portal — ParcelsAddress shapefile zip
+          # These are the direct download URLs for the shapefile package
+          URLS = [
+              "https://opendata.arcgis.com/datasets/ParcelsAddress/downloads/shp",
+              "https://hub.arcgis.com/api/v3/datasets/lucas-county-oh-parcels-address/downloads/data?format=shp&spatialRefId=4326",
+              "https://opendata.arcgis.com/api/v3/datasets/lucas-county-parcels-address/downloads/data?format=shp&spatialRefId=4326",
+          ]
+
+          HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; LucasCountyScraper/1.0)"}
+
+          for url in URLS:
+              try:
+                  print(f"Trying: {url[:80]}")
+                  r = requests.get(url, headers=HEADERS, timeout=180, stream=True)
+                  print(f"  Status: {r.status_code} | Size: {len(r.content):,}")
+                  if r.status_code == 200 and len(r.content) > 50000:
+                      try:
+                          z = zipfile.ZipFile(io.BytesIO(r.content))
+                          dbf_files = [n for n in z.namelist() if n.lower().endswith('.dbf') and 'address' in n.lower()]
+                          if not dbf_files:
+                              dbf_files = [n for n in z.namelist() if n.lower().endswith('.dbf')]
+                          if dbf_files:
+                              z.extract(dbf_files[0], "data/parcels/")
+                              extracted = Path("data/parcels") / dbf_files[0]
+                              if extracted != dest:
+                                  shutil.move(str(extracted), str(dest))
+                              print(f"SUCCESS: {dest} ({dest.stat().st_size:,} bytes)")
+                              sys.exit(0)
+                      except Exception as ze:
+                          print(f"  Zip error: {ze}")
+              except Exception as e:
+                  print(f"  Request error: {e}")
+
+          print("WARNING: Could not download ParcelsAddress DBF.")
+          print("Scraper will run without parcel enrichment (absentee/OOS/address fill skipped).")
+          PYEOF
+
       - name: Run Toledo scraper
-        run: python scraper/fetch.py
+        run: |
+          python scraper/fetch.py \
+            --dbf-address "data/parcels/ParcelsAddress.dbf"
         env:
           PYTHONUNBUFFERED: "1"
-          ZILLOW_API_KEY: ${{ secrets.ZILLOW_API_KEY }} # <--- Added the API key handshake here
+          ZILLOW_API_KEY: ${{ secrets.ZILLOW_API_KEY }}
 
       - name: Commit and push data
         run: |
