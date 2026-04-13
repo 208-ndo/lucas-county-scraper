@@ -15,6 +15,18 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Get week number for cache key
+        id: date
+        run: echo "week=$(date +%Y-%V)" >> $GITHUB_OUTPUT
+
+      - name: Cache ParcelsAddress DBF (weekly refresh)
+        id: cache-dbf
+        uses: actions/cache@v3
+        with:
+          path: data/parcels
+          key: parcels-dbf-${{ steps.date.outputs.week }}
+          restore-keys: parcels-dbf-
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -24,59 +36,156 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r scraper/requirements.txt
-          pip install dbfread
+          pip install dbfread requests
           python -m playwright install --with-deps chromium
 
-      - name: Download ParcelsAddress DBF from Lucas County Open Data
+      - name: Download ParcelsAddress DBF (multi-strategy)
+        if: steps.cache-dbf.outputs.cache-hit != 'true'
         run: |
           mkdir -p data/parcels
           python - <<'PYEOF'
-          import requests, zipfile, io, os, shutil, sys
-          from pathlib import Path
+import requests, zipfile, io, shutil, sys, time, json, csv
+from pathlib import Path
 
-          dest = Path("data/parcels/ParcelsAddress.dbf")
+dest     = Path("data/parcels/ParcelsAddress.dbf")
+csv_dest = Path("data/parcels/ParcelsAddress.csv")
+HEADERS  = {"User-Agent": "Mozilla/5.0 (compatible; LucasCountyScraper/2.0)"}
 
-          # Lucas County Open Data Portal — ParcelsAddress shapefile zip
-          # These are the direct download URLs for the shapefile package
-          URLS = [
-              "https://opendata.arcgis.com/datasets/ParcelsAddress/downloads/shp",
-              "https://hub.arcgis.com/api/v3/datasets/lucas-county-oh-parcels-address/downloads/data?format=shp&spatialRefId=4326",
-              "https://opendata.arcgis.com/api/v3/datasets/lucas-county-parcels-address/downloads/data?format=shp&spatialRefId=4326",
-          ]
+def try_zip(url):
+    print(f"[ZIP] {url[:90]}")
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=180)
+        print(f"      {r.status_code} | {len(r.content):,} bytes")
+        if r.status_code != 200 or len(r.content) < 10000:
+            return False
+        z = zipfile.ZipFile(io.BytesIO(r.content))
+        dbfs = sorted([n for n in z.namelist() if n.lower().endswith('.dbf')],
+                      key=lambda n: ('address' not in n.lower(), n))
+        if not dbfs:
+            print(f"      No DBF. Files: {z.namelist()[:5]}")
+            return False
+        z.extract(dbfs[0], "data/parcels/")
+        # Find extracted file (may be in subdirectory)
+        for p in Path("data/parcels").rglob("*.dbf"):
+            if p != dest:
+                shutil.move(str(p), str(dest))
+                break
+        if dest.exists() and dest.stat().st_size > 50000:
+            print(f"      OK: {dest.stat().st_size:,} bytes")
+            return True
+    except Exception as e:
+        print(f"      Error: {e}")
+    return False
 
-          HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; LucasCountyScraper/1.0)"}
+def try_json_layer(url, label=""):
+    print(f"[JSON] {label or url[:80]}")
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=60)
+        if r.status_code != 200: return False
+        data = r.json()
+        features = data.get("features", [])
+        if not features: return False
+        rows = [f.get("attributes", f.get("properties", {})) for f in features]
+        rows = [r for r in rows if r]
+        if not rows: return False
+        # Check for useful fields
+        sample_keys = " ".join(str(k).upper() for k in rows[0].keys())
+        has_useful = any(x in sample_keys for x in ["OWNER","OWN1","ADDR","PROPERTY_A","PARID"])
+        if not has_useful:
+            print(f"      No useful fields: {list(rows[0].keys())[:8]}")
+            return False
+        with csv_dest.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            w.writeheader(); w.writerows(rows)
+        print(f"      Saved {len(rows)} rows to CSV fallback")
+        return True
+    except Exception as e:
+        print(f"      Error: {e}")
+    return False
 
-          for url in URLS:
-              try:
-                  print(f"Trying: {url[:80]}")
-                  r = requests.get(url, headers=HEADERS, timeout=180, stream=True)
-                  print(f"  Status: {r.status_code} | Size: {len(r.content):,}")
-                  if r.status_code == 200 and len(r.content) > 50000:
-                      try:
-                          z = zipfile.ZipFile(io.BytesIO(r.content))
-                          dbf_files = [n for n in z.namelist() if n.lower().endswith('.dbf') and 'address' in n.lower()]
-                          if not dbf_files:
-                              dbf_files = [n for n in z.namelist() if n.lower().endswith('.dbf')]
-                          if dbf_files:
-                              z.extract(dbf_files[0], "data/parcels/")
-                              extracted = Path("data/parcels") / dbf_files[0]
-                              if extracted != dest:
-                                  shutil.move(str(extracted), str(dest))
-                              print(f"SUCCESS: {dest} ({dest.stat().st_size:,} bytes)")
-                              sys.exit(0)
-                      except Exception as ze:
-                          print(f"  Zip error: {ze}")
-              except Exception as e:
-                  print(f"  Request error: {e}")
+# ── STRATEGY 1: Known Lucas County open data shapefile URLs ───────────────
+zip_urls = [
+    # ArcGIS Hub / Open Data shapefile downloads
+    "https://opendata.arcgis.com/datasets/f37bcb63d5ac4a3b9d926ade17f72be5_0/downloads/data?format=shp&spatialRefId=4326",
+    "https://hub.arcgis.com/api/v3/datasets/f37bcb63d5ac4a3b9d926ade17f72be5_0/downloads/data?format=shp&spatialRefId=4326",
+    # Direct auditor downloads
+    "https://lucascountyauditor.org/GIS/ParcelsAddress.zip",
+    "https://lucascountyauditor.org/downloads/parcels/ParcelsAddress.zip",
+    "https://www.co.lucas.oh.us/GIS/ParcelsAddress.zip",
+    # Lucas County IT GIS portal
+    "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/ParcelsAddress/FeatureServer/0/query?where=1%3D1&outFields=*&f=json&resultRecordCount=2000",
+]
 
-          print("WARNING: Could not download ParcelsAddress DBF.")
-          print("Scraper will run without parcel enrichment (absentee/OOS/address fill skipped).")
-          PYEOF
+for url in zip_urls:
+    if "f=json" in url or "geojson" in url:
+        if try_json_layer(url, "Auditor GIS Feature Service"):
+            print("SUCCESS via JSON layer")
+            sys.exit(0)
+    else:
+        if try_zip(url):
+            print("SUCCESS via ZIP download")
+            sys.exit(0)
+    time.sleep(2)
+
+# ── STRATEGY 2: Lucas County GIS REST API — all known layer indexes ───────
+print("\n[STRATEGY 2] Lucas County GIS REST layers...")
+gis_bases = [
+    "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer",
+    "https://gis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer",
+    "https://lcaudgis.co.lucas.oh.us/arcgis/rest/services/Hosted/ParcelsAddress/FeatureServer",
+]
+for base in gis_bases:
+    for idx in range(0, 8):
+        url = f"{base}/{idx}/query?where=1%3D1&outFields=OWNER,PROPERTY_A,MAILING_AD,PARID,LUC,ZONING&f=json&resultRecordCount=2000"
+        if try_json_layer(url, f"Layer {base.split('/')[-2]}/{idx}"):
+            print("SUCCESS via GIS REST layer")
+            sys.exit(0)
+        time.sleep(1)
+
+# ── STRATEGY 3: Lucas County Auditor public property search CSV export ────
+# Some county auditors expose a bulk download endpoint
+print("\n[STRATEGY 3] Auditor bulk export endpoints...")
+bulk_urls = [
+    "https://lucascountyauditor.org/api/export/parcels?format=csv",
+    "https://lucascountyauditor.org/property-search/export?format=csv&type=all",
+    "https://www.lucascountyauditor.org/GIS/download/parcels.csv",
+]
+for url in bulk_urls:
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=60)
+        if r.status_code == 200 and len(r.content) > 10000:
+            csv_dest.write_bytes(r.content)
+            print(f"SUCCESS: bulk CSV {len(r.content):,} bytes")
+            sys.exit(0)
+    except Exception as e:
+        print(f"  {url[:60]}: {e}")
+    time.sleep(1)
+
+print("\nAll download strategies failed.")
+print("Scraper will use Lucas County Auditor API for per-record address lookup.")
+PYEOF
+
+      - name: Show parcel data status
+        run: |
+          if [ -f "data/parcels/ParcelsAddress.dbf" ]; then
+            SIZE=$(stat -c%s "data/parcels/ParcelsAddress.dbf")
+            echo "✅ DBF: ${SIZE} bytes"
+          elif [ -f "data/parcels/ParcelsAddress.csv" ]; then
+            LINES=$(wc -l < "data/parcels/ParcelsAddress.csv")
+            echo "⚠️  CSV fallback: ${LINES} rows"
+          else
+            echo "❌ No parcel file — auditor API fallback will be used per-record"
+          fi
 
       - name: Run Toledo scraper
         run: |
-          python scraper/fetch.py \
-            --dbf-address "data/parcels/ParcelsAddress.dbf"
+          if [ -f "data/parcels/ParcelsAddress.dbf" ]; then
+            echo "Running with DBF parcel enrichment"
+            python scraper/fetch.py --dbf-address "data/parcels/ParcelsAddress.dbf"
+          else
+            echo "Running without DBF (auditor API fallback active)"
+            python scraper/fetch.py
+          fi
         env:
           PYTHONUNBUFFERED: "1"
           ZILLOW_API_KEY: ${{ secrets.ZILLOW_API_KEY }}
