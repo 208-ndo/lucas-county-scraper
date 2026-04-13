@@ -1,40 +1,25 @@
 """
-Toledo / Lucas County — Motivated Seller Intelligence Platform v2
+Toledo / Lucas County — Motivated Seller Intelligence Platform v3
 =================================================================
 FREE PUBLIC SOURCES:
-  1. Toledo Legal News Common Pleas daily filings  — foreclosures, liens, judgments
-  2. Toledo Legal News Foreclosure Notices          — individual case articles
-  3. Lucas County Sheriff Sale Auction site         — active sheriff sales
-  4. Lucas County Foreclosure Search app            — tax + mortgage foreclosures
-  5. TLN Probate Court                              — estate filings
-  6. TLN Domestic Relations                         — divorces
-  7. Ohio SOS UCC                                   — mechanic / commercial liens
-  8. PACER RSS                                      — federal liens, bankruptcies
-  9. Toledo Municipal Court                         — code violations / evictions
- 10. Lucas County Treasurer                         — tax delinquent
+  1. Toledo Legal News Common Pleas        — foreclosures, liens, judgments
+  2. Toledo Legal News Foreclosure Notices — individual case articles
+  3. Lucas County Sheriff Sale Auction     — active sheriff sales
+  4. TLN Probate Court                     — estate filings
+  5. TLN Domestic Relations                — divorces
+  6. Lucas County Common Pleas Public App  — DR/divorce case search (no login)
+  7. Lucas County Auditor Property Search  — address lookup by owner name (fallback)
+  8. Lucas County Treasurer                — tax delinquent
+  9. TLN Tax Foreclosure articles          — tax delinquent parcels
 
-PARCEL ENRICHMENT (local DBF files):
-  - Parcels.dbf         (geometry / lot info — not used directly)
-  - ParcelsAddress.dbf  (owner, property address, mailing address, LUC, PARID)
+PARCEL ENRICHMENT:
+  - ParcelsAddress.dbf (local file — downloaded by workflow OR passed via --dbf-address)
+  - Fields used: OWNER, PROPERTY_A, MAILING_AD, PARID, LUC, ZONING
 
-  Place ParcelsAddress.dbf at:
-    <repo_root>/data/parcels/ParcelsAddress.dbf
-  OR set env var:
-    DBF_PARCELS_ADDRESS=/full/path/to/ParcelsAddress.dbf
-  OR pass CLI flag:
-    python fetch.py --dbf-address /full/path/to/ParcelsAddress.dbf
-
-  Key fields used from ParcelsAddress.dbf:
-    OWNER       — owner name (e.g. "SMITH JOHN A")
-    PROPERTY_A  — property address (e.g. "1456 SUMMIT ST, TOLEDO OH 43604")
-    MAILING_AD  — mailing address  (e.g. "650 W PEACHTREE SQ NW, ATLANTA GA 30308")
-    PARID       — parcel ID
-    LUC         — land use code
-    ZONING      — zoning code
-
-VALUATION (with API key):
-  - Zillow via RapidAPI (ZILLOW_API_KEY secret)
-  - Fallback: county assessed value / 0.35 (35% assessment ratio)
+HOME VALUE (no API key needed):
+  - Redfin AVM via autocomplete + property detail API (free, no auth)
+  - Fallback: assessed value / 0.35 (Lucas County 35% ratio)
+  - Optional: Zillow RapidAPI (ZILLOW_API_KEY) with proper rate limiting
 """
 import argparse, asyncio, csv, json, logging, os, re, time, random
 from collections import defaultdict
@@ -58,32 +43,27 @@ DEFAULT_OUTPUT_JSON_PATHS = [DATA_DIR / "records.json", DASHBOARD_DIR / "records
 DEFAULT_OUTPUT_CSV_PATH   = DATA_DIR / "ghl_export.csv"
 DEFAULT_ENRICHED_CSV_PATH = DATA_DIR / "records.enriched.csv"
 
-# ── DBF parcel file paths ──────────────────────────────────────────────────
-# ParcelsAddress.dbf is the one that has owner/address data.
-# Parcels.dbf only has geometry — not used for enrichment.
+# ── DBF path ───────────────────────────────────────────────────────────────
 DBF_PARCELS_ADDRESS = Path(
-    os.getenv(
-        "DBF_PARCELS_ADDRESS",
-        str(BASE_DIR / "data" / "parcels" / "ParcelsAddress.dbf")
-    )
+    os.getenv("DBF_PARCELS_ADDRESS",
+              str(BASE_DIR / "data" / "parcels" / "ParcelsAddress.dbf"))
 )
 
 LOOKBACK_DAYS = 90
 SOURCE_NAME   = "Toledo / Lucas County, Ohio"
 OH_APPR_RATE  = 0.04
 
-# ── Zillow API config ──────────────────────────────────────────────────────
-ZILLOW_API_KEY    = os.getenv("ZILLOW_API_KEY", "")
-ZILLOW_API_HOST   = "zillow-com1.p.rapidapi.com"
+# ── Zillow (optional, secondary to Redfin) ─────────────────────────────────
+ZILLOW_API_KEY   = os.getenv("ZILLOW_API_KEY", "")
+ZILLOW_API_HOST  = "zillow-com1.p.rapidapi.com"
 ZILLOW_CACHE: Dict[str, Optional[float]] = {}
-ZILLOW_CALLS      = 0
-ZILLOW_MAX_CALLS  = 400
+ZILLOW_CALLS     = 0
+ZILLOW_MAX_CALLS = 400
 
-# Tokens in an address that indicate it's junk / not a real property address
-ZILLOW_SKIP_TOKENS = {
-    "increments", "bids", "am et", "property addr", "pending",
-    "unknown", "tbd", "n/a", "none",
-}
+# ── Redfin AVM cache ────────────────────────────────────────────────────────
+REDFIN_CACHE: Dict[str, Optional[dict]] = {}
+REDFIN_CALLS = 0
+REDFIN_MAX_CALLS = 300   # stay polite
 
 # ── Source URLs ────────────────────────────────────────────────────────────
 TLN_BASE             = "https://www.toledolegalnews.com"
@@ -92,7 +72,10 @@ TLN_FORECLOSURES_URL = "https://www.toledolegalnews.com/legal_notices/foreclosur
 TLN_PROBATE_URL      = "https://www.toledolegalnews.com/courts/probate/"
 TLN_DOMESTIC_URL     = "https://www.toledolegalnews.com/courts/domestic_court/"
 SHERIFF_AUCTION_URL  = "https://lucas.sheriffsaleauction.ohio.gov/index.cfm?zaction=USER&zmethod=CALENDAR"
-LC_FORECLOSURE_URL   = "http://lcapps.co.lucas.oh.us/foreclosure/search.aspx"
+LC_AUDITOR_SEARCH    = "https://lucascountyauditor.org/api/property/search"
+LC_AUDITOR_WEB       = "https://lucascountyauditor.org/property-search"
+LC_CPC_SEARCH        = "http://lcapps.co.lucas.oh.us/CPC/"
+LC_TREASURER_URL     = "https://www.lucascountytreasurer.org/delinquent-taxes"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -100,7 +83,36 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# ── Lead type maps ─────────────────────────────────────────────────────────
+REDFIN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json,text/html,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.redfin.com/",
+}
+
+# ── Boilerplate legal phrases that are NOT real owner names ───────────────
+LEGAL_BOILERPLATE = {
+    "named above be required to answer",
+    "to the defendant the unknown spouse",
+    "unknown spouse",
+    "unknown heirs",
+    "john doe",
+    "jane doe",
+    "et al",
+    "all unknown parties",
+    "unknown persons",
+    "parties unknown",
+    "defendant unknown",
+    "to be named",
+    "all others claiming",
+    "whose last known",
+    "whose place of residence",
+    "and all other persons",
+    "notice of foreclosure",
+    "notice of sheriff",
+    "defendants",
+}
+
 LEAD_TYPE_MAP = {
     "LP":"Lis Pendens","NOFC":"Pre-foreclosure","TAXDEED":"Tax Deed",
     "JUD":"Judgment","CCJ":"Certified Judgment","DRJUD":"Domestic Judgment",
@@ -126,6 +138,11 @@ NOISE_WORDS = [
     "contact us","terms of use","privacy","e-edition","classifieds",
     "marriage license","death notice","building permit","vendor license",
 ]
+
+JUNK_ADDRESS_TOKENS = {
+    "increments","bids","am et","property addr","pending",
+    "unknown","tbd","n/a","none","government center",
+}
 
 # ── Data class ─────────────────────────────────────────────────────────────
 @dataclass
@@ -165,10 +182,14 @@ class LeadRecord:
     is_inherited: bool = False
     assessed_value: Optional[float] = None
     estimated_value: Optional[float] = None
+    redfin_value: Optional[float] = None
     zillow_value: Optional[float] = None
     value_source: str = ""
     last_sale_price: Optional[float] = None
     last_sale_year: Optional[int] = None
+    beds: Optional[int] = None
+    baths: Optional[float] = None
+    sqft: Optional[int] = None
     est_mortgage_balance: Optional[float] = None
     est_equity: Optional[float] = None
     est_arrears: Optional[float] = None
@@ -187,10 +208,8 @@ def ensure_dirs():
         d.mkdir(parents=True, exist_ok=True)
 
 def log_setup():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s | %(levelname)s | %(message)s")
 
 def save_debug(name: str, content: str):
     try:
@@ -206,11 +225,13 @@ def norm_state(v: str) -> str:
     v = re.sub(r"[^A-Z]", "", clean(v).upper())
     return v if v in STATE_CODES else ""
 
-def retry_get(url: str, attempts: int = 3, timeout: int = 30, delay: float = 2.0, **kwargs):
+def retry_get(url: str, attempts: int = 3, timeout: int = 30,
+              delay: float = 2.0, headers=None, **kwargs):
+    h = headers or HEADERS
     last = None
     for i in range(1, attempts + 1):
         try:
-            r = requests.get(url, headers=HEADERS, timeout=timeout,
+            r = requests.get(url, headers=h, timeout=timeout,
                              allow_redirects=True, **kwargs)
             r.raise_for_status()
             return r
@@ -221,30 +242,15 @@ def retry_get(url: str, attempts: int = 3, timeout: int = 30, delay: float = 2.0
                 time.sleep(delay * i + random.uniform(0, 1))
     raise last
 
-def retry_post(url: str, data: dict, attempts: int = 3, timeout: int = 30):
-    last = None
-    for i in range(1, attempts + 1):
-        try:
-            r = requests.post(url, headers=HEADERS, data=data,
-                              timeout=timeout, allow_redirects=True)
-            r.raise_for_status()
-            return r
-        except Exception as e:
-            last = e
-            if i < attempts: time.sleep(2 * i)
-    raise last
-
 async def pw_fetch(url: str, wait_ms: int = 2500) -> str:
-    """Playwright fetch with anti-bot bypass."""
-    # Skip non-HTTP URLs (mailto, share links, etc.)
-    if not url.startswith("http"):
+    if not url or not url.startswith("http"):
         return ""
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox","--disable-blink-features=AutomationControlled",
-                      "--disable-dev-shm-usage","--disable-gpu"]
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
+                      "--disable-dev-shm-usage", "--disable-gpu"]
             )
             ctx = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -263,10 +269,10 @@ async def pw_fetch(url: str, wait_ms: int = 2500) -> str:
                 if domain:
                     try:
                         await page.goto(domain.group(0), wait_until="domcontentloaded", timeout=15000)
-                        await page.wait_for_timeout(800 + random.randint(0, 400))
+                        await page.wait_for_timeout(600 + random.randint(0, 300))
                     except: pass
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(wait_ms + random.randint(0, 600))
+                await page.wait_for_timeout(wait_ms + random.randint(0, 500))
                 html = await page.content()
                 logging.info("pw_fetch %s chars from %s", len(html), url[:80])
                 return html
@@ -301,27 +307,20 @@ def norm_name(n: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,&.\- /']", " ", n)).strip()
 
 def name_variants(name: str) -> List[str]:
-    """
-    Generate lookup variants for a name.
-    Lucas County DBF stores names as: LASTNAME FIRSTNAME MI  (no comma)
-    Government filings use:           FIRSTNAME LASTNAME  or  LASTNAME, FIRSTNAME
-    We generate all permutations so both directions match.
-    """
     n = clean(name).upper()
     if not n: return []
-    # Strip common suffixes
     n = re.sub(r'\b(JR|SR|II|III|IV|ESQ|DEC|DECEASED|ET\s+AL|ETAL)\.?\b', '', n).strip()
     variants: set = {n}
     parts = [p for p in re.split(r"[\s,]+", n) if p and len(p) > 1]
     if len(parts) >= 2:
-        variants.add(" ".join(parts))                   # AS-IS joined
-        variants.add(f"{parts[-1]} {parts[0]}")         # LAST FIRST
-        variants.add(f"{parts[0]} {parts[-1]}")         # FIRST LAST
-        variants.add(f"{parts[-1]}, {parts[0]}")        # LAST, FIRST
-        variants.add(f"{parts[0]}, {parts[-1]}")        # FIRST, LAST
-        variants.add(" ".join(sorted(parts)))            # token-sorted
-        variants.add(parts[0])                          # first token only
-        variants.add(parts[-1])                         # last token only
+        variants.add(" ".join(parts))
+        variants.add(f"{parts[-1]} {parts[0]}")
+        variants.add(f"{parts[0]} {parts[-1]}")
+        variants.add(f"{parts[-1]}, {parts[0]}")
+        variants.add(f"{parts[0]}, {parts[-1]}")
+        variants.add(" ".join(sorted(parts)))
+        variants.add(parts[0])
+        variants.add(parts[-1])
     return [v.strip() for v in variants if v.strip()]
 
 def likely_corp(n: str) -> bool:
@@ -329,6 +328,15 @@ def likely_corp(n: str) -> bool:
             "PROPERTIES","REALTY","INVESTMENTS","CAPITAL","GROUP","PARTNERS",
             "MANAGEMENT","ENTERPRISES","SOLUTIONS","SERVICES","ASSOCIATES"}
     return any(t in CORP for t in norm_name(n).split())
+
+def is_boilerplate_name(name: str) -> bool:
+    """Return True if name is legal boilerplate, not a real person/entity."""
+    n = clean(name).lower()
+    if not n or len(n) < 3: return True
+    if any(phrase in n for phrase in LEGAL_BOILERPLATE): return True
+    # Pure digits or very short
+    if re.fullmatch(r"[\d\s\-\.]+", n): return True
+    return False
 
 def try_parse_date(text: str) -> Optional[str]:
     text = clean(text)
@@ -359,11 +367,9 @@ def is_noise(text: str) -> bool:
     return any(w in t for w in NOISE_WORDS)
 
 def is_valid_address(addr: str) -> bool:
-    """Return False for junk / placeholder addresses."""
     if not addr: return False
     a = addr.lower()
-    if any(t in a for t in ZILLOW_SKIP_TOKENS): return False
-    # Must start with a real house number (1-5 digits then a letter)
+    if any(t in a for t in JUNK_ADDRESS_TOKENS): return False
     if not re.match(r"^\d{1,5}\s+[a-zA-Z]", addr.strip()): return False
     return True
 
@@ -372,7 +378,7 @@ def infer_doc_type(text: str) -> Optional[str]:
     if any(x in t for x in ["LIS PENDENS"," LP ","LP-"]): return "LP"
     if any(x in t for x in ["NOTICE OF FORECLOSURE","FORECLOS","NOFC","COMPLAINT TO FORECLOSE","MTG ON","MORTGAGE FORECLOSURE"]): return "NOFC"
     if any(x in t for x in ["SHERIFF","AUCTION"]): return "SHERIFF"
-    if any(x in t for x in ["DIVORCE","DISSOLUTION OF MARRIAGE"]): return "DIVORCE"
+    if any(x in t for x in ["DIVORCE","DISSOLUTION OF MARRIAGE","DR-","DM-"]): return "DIVORCE"
     if any(x in t for x in ["EVICTION","FORCIBLE ENTRY"]): return "EVICTION"
     if "CERTIFIED JUDGMENT" in t: return "CCJ"
     if "JUDGMENT" in t: return "JUD"
@@ -435,24 +441,240 @@ def is_oos(mail_state: str) -> bool:
     s = norm_state(mail_state)
     return bool(s and s != "OH")
 
-# ── Zillow API ─────────────────────────────────────────────────────────────
-def get_zillow_value(address: str, city: str = "Toledo", state: str = "OH", zip_code: str = "") -> Optional[float]:
+# ── Lucas County Auditor — property search by owner name (free, no auth) ──
+_auditor_cache: Dict[str, Optional[dict]] = {}
+
+def auditor_lookup_by_name(owner_name: str) -> Optional[dict]:
+    """
+    Query Lucas County Auditor property search by owner name.
+    Returns first residential match with address.
+    Used as fallback when DBF parcel matching fails.
+    """
+    key = norm_name(owner_name)
+    if key in _auditor_cache:
+        return _auditor_cache[key]
+
+    if not owner_name or len(owner_name) < 4:
+        _auditor_cache[key] = None
+        return None
+
+    try:
+        # Lucas County Auditor JSON API
+        params = {
+            "query": owner_name,
+            "type": "owner",
+            "limit": 5,
+        }
+        r = requests.get(
+            LC_AUDITOR_SEARCH,
+            params=params,
+            headers={**HEADERS, "Accept": "application/json"},
+            timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            results = data.get("results", data.get("properties", data.get("data", [])))
+            if results and isinstance(results, list):
+                for item in results:
+                    addr = clean(item.get("address","") or item.get("prop_address","") or item.get("siteAddress",""))
+                    if is_valid_address(addr):
+                        result = {
+                            "prop_address": addr.title(),
+                            "prop_city": clean(item.get("city","") or "Toledo").title(),
+                            "prop_zip": clean(item.get("zip","") or item.get("zipCode","")),
+                            "parcel_id": clean(item.get("parcelId","") or item.get("parcel_id","")),
+                            "assessed_value": None,
+                        }
+                        _auditor_cache[key] = result
+                        return result
+    except Exception as e:
+        logging.debug("Auditor API lookup failed %s: %s", owner_name[:30], e)
+
+    # Fallback: scrape the web page
+    try:
+        r2 = requests.get(
+            LC_AUDITOR_WEB,
+            params={"search": owner_name, "searchType": "owner"},
+            headers=HEADERS,
+            timeout=15
+        )
+        if r2.status_code == 200:
+            soup = BeautifulSoup(r2.text, "lxml")
+            # Look for address patterns in results
+            addr_pat = re.compile(
+                r"(\d{1,5}\s+[A-Za-z][A-Za-z0-9\s\.]{3,30}"
+                r"(?:ST|AVE|RD|DR|BLVD|LN|CT|PL|WAY|TER|CIR)\.?)",
+                re.IGNORECASE
+            )
+            for m in addr_pat.finditer(soup.get_text(" ")):
+                addr = clean(m.group(1))
+                if is_valid_address(addr):
+                    _auditor_cache[key] = {"prop_address": addr.title(), "prop_city": "Toledo", "prop_zip": ""}
+                    return _auditor_cache[key]
+    except Exception as e:
+        logging.debug("Auditor web lookup failed %s: %s", owner_name[:30], e)
+
+    _auditor_cache[key] = None
+    return None
+
+# ── Redfin AVM ─────────────────────────────────────────────────────────────
+def get_redfin_value(address: str, city: str = "Toledo", state: str = "OH",
+                     zip_code: str = "") -> Optional[dict]:
+    """
+    Get home value estimate from Redfin.
+    Returns dict with: avm, last_sale_price, last_sale_year, beds, baths, sqft
+    No API key needed. Respectful rate limiting.
+    """
+    global REDFIN_CALLS
+    if not is_valid_address(address): return None
+    if REDFIN_CALLS >= REDFIN_MAX_CALLS:
+        logging.warning("Redfin call limit reached (%s)", REDFIN_MAX_CALLS)
+        return None
+
+    full_addr = f"{address}, {city}, {state}"
+    if zip_code: full_addr += f" {zip_code}"
+    cache_key = norm_addr_key(full_addr)
+    if cache_key in REDFIN_CACHE:
+        return REDFIN_CACHE[cache_key]
+
+    try:
+        # Step 1: Autocomplete to get property ID
+        ac_url = "https://www.redfin.com/stingray/do/location-autocomplete"
+        r = requests.get(
+            ac_url,
+            params={"location": full_addr, "v": "2", "market": "toledo", "count": "5"},
+            headers=REDFIN_HEADERS,
+            timeout=10
+        )
+        REDFIN_CALLS += 1
+
+        if r.status_code != 200:
+            REDFIN_CACHE[cache_key] = None
+            return None
+
+        # Redfin returns "{}&&" prefix on JSON responses
+        raw = r.text
+        if raw.startswith("{}&&"):
+            raw = raw[4:]
+        data = json.loads(raw)
+
+        # Find best matching property
+        payload = data.get("payload", {})
+        sections = payload.get("sections", [])
+        property_url = None
+        property_id = None
+
+        for section in sections:
+            for row in section.get("rows", []):
+                if row.get("type") in ("1", 1, "property"):  # type 1 = property
+                    url_path = row.get("url", "")
+                    prop_id = row.get("id", {}).get("tableId") if isinstance(row.get("id"), dict) else None
+                    if url_path:
+                        property_url = url_path
+                        property_id = prop_id
+                        break
+            if property_url:
+                break
+
+        if not property_url:
+            REDFIN_CACHE[cache_key] = None
+            return None
+
+        # Step 2: Get property details including AVM
+        time.sleep(1.5 + random.uniform(0, 0.5))  # respectful delay
+        detail_url = "https://www.redfin.com/stingray/api/home/details/initialInfo"
+        r2 = requests.get(
+            detail_url,
+            params={"path": property_url, "accessLevel": "1"},
+            headers=REDFIN_HEADERS,
+            timeout=10
+        )
+        REDFIN_CALLS += 1
+
+        if r2.status_code != 200:
+            REDFIN_CACHE[cache_key] = None
+            return None
+
+        raw2 = r2.text
+        if raw2.startswith("{}&&"):
+            raw2 = raw2[4:]
+        detail = json.loads(raw2)
+
+        # Extract AVM and property data
+        payload2 = detail.get("payload", {})
+        avm = None
+        last_sale_price = None
+        last_sale_year = None
+        beds = None
+        baths = None
+        sqft = None
+
+        # Try multiple paths for AVM
+        home_info = payload2.get("homeInfo", {})
+        avm = (home_info.get("avm") or
+               home_info.get("priceEstimate") or
+               payload2.get("avm") or
+               payload2.get("estimatedValue"))
+
+        # Property details
+        beds = home_info.get("beds")
+        baths = home_info.get("baths")
+        sqft = home_info.get("sqFt") or home_info.get("sqft")
+
+        # Last sale
+        last_sold = home_info.get("lastSoldDate", "")
+        last_sale_price = home_info.get("lastSoldPrice")
+        if last_sold:
+            try:
+                last_sale_year = datetime.strptime(last_sold[:10], "%Y-%m-%d").year
+            except: pass
+
+        if not avm and last_sale_price:
+            # Appreciate from last sale if no AVM
+            yrs = max(0, datetime.now().year - (last_sale_year or datetime.now().year))
+            avm = round(last_sale_price * ((1 + OH_APPR_RATE) ** yrs))
+
+        if avm and float(avm) > 5000:
+            result = {
+                "avm": float(avm),
+                "last_sale_price": float(last_sale_price) if last_sale_price else None,
+                "last_sale_year": last_sale_year,
+                "beds": int(beds) if beds else None,
+                "baths": float(baths) if baths else None,
+                "sqft": int(sqft) if sqft else None,
+            }
+            REDFIN_CACHE[cache_key] = result
+            logging.info("Redfin: %s -> $%,.0f (call #%s)", address[:40], avm, REDFIN_CALLS)
+            return result
+
+    except Exception as e:
+        logging.debug("Redfin lookup failed %s: %s", address[:40], e)
+
+    REDFIN_CACHE[cache_key] = None
+    return None
+
+# ── Zillow API (secondary, rate-limited) ───────────────────────────────────
+def get_zillow_value(address: str, city: str = "Toledo", state: str = "OH",
+                     zip_code: str = "") -> Optional[float]:
     global ZILLOW_CALLS
     if not ZILLOW_API_KEY: return None
     if not is_valid_address(address): return None
-    if ZILLOW_CALLS >= ZILLOW_MAX_CALLS:
-        logging.warning("Zillow call limit reached (%s)", ZILLOW_MAX_CALLS)
-        return None
+    if ZILLOW_CALLS >= ZILLOW_MAX_CALLS: return None
 
     full_addr = f"{address}, {city}, {state}"
     if zip_code: full_addr += f" {zip_code}"
     cache_key = norm_addr_key(full_addr)
     if cache_key in ZILLOW_CACHE: return ZILLOW_CACHE[cache_key]
 
+    # Rate limit: 2 second delay between calls
+    time.sleep(2.0 + random.uniform(0, 0.5))
+
     try:
-        url = f"https://{ZILLOW_API_HOST}/propertyExtendedSearch"
         headers = {"X-RapidAPI-Key": ZILLOW_API_KEY, "X-RapidAPI-Host": ZILLOW_API_HOST}
-        r = requests.get(url, headers=headers, params={"location": full_addr}, timeout=10)
+        r = requests.get(
+            f"https://{ZILLOW_API_HOST}/propertyExtendedSearch",
+            headers=headers, params={"location": full_addr}, timeout=10
+        )
         r.raise_for_status()
         ZILLOW_CALLS += 1
         data = r.json()
@@ -460,104 +682,134 @@ def get_zillow_value(address: str, city: str = "Toledo", state: str = "OH", zip_
         props = data.get("props", [])
         if props:
             first = props[0]
-            zestimate = (
-                first.get("zestimate") or first.get("price") or
-                first.get("listPrice") or
-                first.get("hdpData", {}).get("homeInfo", {}).get("zestimate")
-            )
-        if not zestimate and props:
-            zpid = props[0].get("zpid")
-            if zpid:
-                dr = requests.get(f"https://{ZILLOW_API_HOST}/property",
-                                  headers=headers, params={"zpid": zpid}, timeout=10)
-                ZILLOW_CALLS += 1
-                if dr.status_code == 200:
-                    dd = dr.json()
-                    zestimate = (dd.get("zestimate") or dd.get("price") or
-                                 dd.get("homeDetails", {}).get("zestimate"))
+            zestimate = (first.get("zestimate") or first.get("price") or
+                         first.get("listPrice") or
+                         first.get("hdpData", {}).get("homeInfo", {}).get("zestimate"))
         if zestimate:
-            val = float(str(zestimate).replace(",", "").replace("$", ""))
+            val = float(str(zestimate).replace(",","").replace("$",""))
             if val > 1000:
                 ZILLOW_CACHE[cache_key] = val
                 logging.info("Zillow: %s -> $%,.0f (call #%s)", address[:40], val, ZILLOW_CALLS)
                 return val
     except Exception as e:
-        logging.warning("Zillow lookup failed %s: %s", address[:40], e)
+        logging.debug("Zillow failed %s: %s", address[:40], e)
 
     ZILLOW_CACHE[cache_key] = None
     return None
 
-def get_best_value_estimate(record: "LeadRecord") -> tuple:
-    if ZILLOW_API_KEY and is_valid_address(record.prop_address):
-        zval = get_zillow_value(
+def get_best_value(record: "LeadRecord") -> tuple:
+    """
+    Returns (value, source) using best available method.
+    Priority: Redfin AVM > Zillow API > Assessed/0.35 > Last sale appreciated
+    """
+    if is_valid_address(record.prop_address):
+        # Try Redfin first (free, no rate limit issues)
+        rf = get_redfin_value(
             record.prop_address,
             record.prop_city or "Toledo",
             record.prop_state or "OH",
             record.prop_zip or ""
         )
-        if zval and zval > 5000:
-            return zval, "Zillow Zestimate"
+        if rf and rf.get("avm") and rf["avm"] > 5000:
+            # Also store property details
+            if rf.get("last_sale_price") and not record.last_sale_price:
+                record.last_sale_price = rf["last_sale_price"]
+            if rf.get("last_sale_year") and not record.last_sale_year:
+                record.last_sale_year = rf["last_sale_year"]
+            if rf.get("beds") and not record.beds: record.beds = rf["beds"]
+            if rf.get("baths") and not record.baths: record.baths = rf["baths"]
+            if rf.get("sqft") and not record.sqft: record.sqft = rf["sqft"]
+            record.redfin_value = rf["avm"]
+            return rf["avm"], "Redfin AVM"
+
+        # Try Zillow as secondary
+        if ZILLOW_API_KEY:
+            zval = get_zillow_value(
+                record.prop_address,
+                record.prop_city or "Toledo",
+                record.prop_state or "OH",
+                record.prop_zip or ""
+            )
+            if zval and zval > 5000:
+                record.zillow_value = zval
+                return zval, "Zillow Zestimate"
+
+    # Assessed value fallback (Lucas County 35% ratio)
     if record.assessed_value and record.assessed_value > 1000:
         return round(record.assessed_value / 0.35, 2), "Assessed Value (est)"
+
+    # Last sale with appreciation
     if record.last_sale_price and record.last_sale_price > 5000:
         yrs = max(0, datetime.now().year - (record.last_sale_year or datetime.now().year))
         return round(record.last_sale_price * ((1 + OH_APPR_RATE) ** yrs), 2), "Last Sale (appreciated)"
+
     return None, ""
 
-# ── Mortgage / equity estimation ───────────────────────────────────────────
+# ── Mortgage / equity / subject-to ────────────────────────────────────────
 def estimate_financials(record: "LeadRecord") -> "LeadRecord":
     signals = []
     sto = 0
+
     if not record.estimated_value:
-        val, source = get_best_value_estimate(record)
+        val, source = get_best_value(record)
         if val:
             record.estimated_value = val
             record.value_source = source
-            if not record.zillow_value and source == "Zillow Zestimate":
-                record.zillow_value = val
+
     mv = record.estimated_value
+
+    # Mortgage balance estimate from last sale
     if record.last_sale_price and record.last_sale_year and record.last_sale_price > 5000:
-        yrs_elapsed = max(0, min(30, datetime.now().year - record.last_sale_year))
+        yrs = max(0, min(30, datetime.now().year - record.last_sale_year))
         orig = record.last_sale_price * 0.80
-        mr = 0.065 / 12; n = 360; paid = yrs_elapsed * 12
+        mr = 0.065 / 12; n = 360; paid = yrs * 12
         if mr > 0 and paid < n:
-            bal = orig * ((1 + mr) ** n - (1 + mr) ** paid) / ((1 + mr) ** n - 1)
+            bal = orig * ((1+mr)**n - (1+mr)**paid) / ((1+mr)**n - 1)
             record.est_mortgage_balance = round(max(0, bal), 2)
         elif paid >= n:
             record.est_mortgage_balance = 0.0
+
     if mv and record.est_mortgage_balance is not None:
         record.est_equity = round(mv - record.est_mortgage_balance, 2)
     elif mv and record.est_mortgage_balance is None and not record.last_sale_price:
         record.est_mortgage_balance = round(mv * 0.50, 2)
         record.est_equity = round(mv * 0.50, 2)
         record.est_payoff = record.est_mortgage_balance
+
     if record.doc_type in {"LP","NOFC","TAXDEED","SHERIFF"} and record.amount and record.amount > 0:
         record.est_arrears = record.amount
         record.est_payoff = record.est_mortgage_balance or record.amount
         signals.append(f"Arrears ~${record.est_arrears:,.0f}")
+
     if "Tax lien" in record.flags and record.amount and record.amount > 0:
         record.est_arrears = (record.est_arrears or 0) + record.amount
         signals.append(f"Tax owed ~${record.amount:,.0f}")
+
+    # Subject-To scoring
     if record.est_equity is not None:
         if record.est_equity > 50000: sto += 30; signals.append("High equity")
         elif record.est_equity > 20000: sto += 20; signals.append("Moderate equity")
         elif record.est_equity > 0: sto += 10
         else: signals.append("Underwater")
+
     if record.doc_type in {"LP","NOFC","SHERIFF"}: sto += 25; signals.append("Active foreclosure")
     if record.doc_type == "PRO": sto += 20; signals.append("Estate / probate")
     if record.is_absentee: sto += 15; signals.append("Absentee owner")
     if record.is_out_of_state: sto += 10; signals.append("Out-of-state owner")
     if record.is_inherited: sto += 20; signals.append("Inherited property")
     if "Tax lien" in record.flags: sto += 15
+
     if record.est_mortgage_balance and record.estimated_value and record.estimated_value > 0:
         ltv = record.est_mortgage_balance / record.estimated_value
         if ltv < 0.5: sto += 20; signals.append("Low LTV <50%")
         elif ltv < 0.7: sto += 10; signals.append("LTV <70%")
         elif ltv > 0.95: signals.append("High LTV >95%")
+
     if sto >= 50 and "Subject-To Candidate" not in " ".join(record.flags):
         record.flags.append("Subject-To Candidate")
     if sto >= 70 and "Prime Subject-To" not in " ".join(record.flags):
         record.flags.append("Prime Subject-To")
+
     record.subject_to_score = min(sto, 100)
     record.mortgage_signals = signals
     return record
@@ -586,12 +838,11 @@ def score_record(record: "LeadRecord") -> int:
     if "lis pendens" in lf and "pre-foreclosure" in lf: score += 20
     if record.amount is not None:
         score += 15 if record.amount > 100000 else (10 if record.amount > 50000 else 5)
-    if record.zillow_value or record.estimated_value: score += 5
+    if record.estimated_value or record.redfin_value: score += 5
     if record.filed:
         try:
             if datetime.fromisoformat(record.filed).date() >= (datetime.now().date() - timedelta(days=7)):
-                if "New this week" not in record.flags:
-                    record.flags.append("New this week")
+                if "New this week" not in record.flags: record.flags.append("New this week")
                 score += 5
         except: pass
     if is_valid_address(record.prop_address): score += 5
@@ -602,64 +853,36 @@ def score_record(record: "LeadRecord") -> int:
     if bk >= 2:
         score += STACK_BONUS.get(bk, STACK_BONUS[4])
         record.hot_stack = True
-        if "Hot Stack" not in " ".join(record.flags):
-            record.flags.append("Hot Stack")
+        if "Hot Stack" not in " ".join(record.flags): record.flags.append("Hot Stack")
     return min(score, 100)
 
-# ── DBF Parcel data loader ─────────────────────────────────────────────────
-def _parse_dbf_property_address(raw: str) -> tuple:
-    """
-    Parse ParcelsAddress PROPERTY_A field.
-    Format: '1456 SUMMIT ST, TOLEDO OH 43604'
-    Returns: (street, city, state, zip)
-    """
+# ── DBF Parcel loader ──────────────────────────────────────────────────────
+def _parse_prop_addr(raw: str) -> tuple:
     if not raw: return "", "Toledo", "OH", ""
     raw = raw.strip()
     m = re.match(r"^(\d+\s+.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})\s+(\d{5})?$", raw)
-    if m:
-        return (clean(m.group(1)).title(), clean(m.group(2)).title(),
-                m.group(3).upper(), m.group(4) or "")
+    if m: return (clean(m.group(1)).title(), clean(m.group(2)).title(), m.group(3).upper(), m.group(4) or "")
     m2 = re.match(r"^(\d+\s+.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})$", raw)
-    if m2:
-        return clean(m2.group(1)).title(), clean(m2.group(2)).title(), m2.group(3).upper(), ""
+    if m2: return clean(m2.group(1)).title(), clean(m2.group(2)).title(), m2.group(3).upper(), ""
     return raw.title(), "Toledo", "OH", ""
 
-def _parse_dbf_mailing_address(raw: str) -> tuple:
-    """
-    Parse ParcelsAddress MAILING_AD field.
-    Format: '650 W PEACHTREE SQ NW, ATLANTA GA 30308'
-    Returns: (street, city, state, zip)
-    """
+def _parse_mail_addr(raw: str) -> tuple:
     if not raw: return "", "", "", ""
     raw = raw.strip()
     m = re.match(r"^(.+?),\s*([A-Za-z\s\.]+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)?$", raw)
-    if m:
-        return (clean(m.group(1)).title(), clean(m.group(2)).title(),
-                m.group(3).upper(), (m.group(4) or "")[:5])
+    if m: return (clean(m.group(1)).title(), clean(m.group(2)).title(), m.group(3).upper(), (m.group(4) or "")[:5])
     m2 = re.match(r"^(.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})$", raw)
-    if m2:
-        return clean(m2.group(1)).title(), clean(m2.group(2)).title(), m2.group(3).upper(), ""
+    if m2: return clean(m2.group(1)).title(), clean(m2.group(2)).title(), m2.group(3).upper(), ""
     return raw.title(), "", "", ""
 
 def load_parcel_data() -> Dict[str, dict]:
-    """
-    Load ParcelsAddress.dbf from local filesystem.
-
-    Indexes records two ways:
-      norm_addr_key(prop_street)  -> parcel dict   (address lookup)
-      'OWNER:<name_variant>'      -> parcel dict   (name lookup for probate)
-
-    Returns empty dict if file not found or dbfread not installed.
-    """
     parcels: Dict[str, dict] = {}
 
     if not DBF_PARCELS_ADDRESS.exists():
         logging.warning(
             "ParcelsAddress.dbf not found at: %s\n"
-            "  → Copy it to data/parcels/ParcelsAddress.dbf\n"
-            "  → OR set env var: DBF_PARCELS_ADDRESS=/path/to/ParcelsAddress.dbf\n"
-            "  → OR pass: --dbf-address /path/to/ParcelsAddress.dbf\n"
-            "  Parcel enrichment (absentee/OOS/address fill) will be skipped.",
+            "  Absentee/OOS/address enrichment will use auditor API fallback only.\n"
+            "  To fix: set env var DBF_PARCELS_ADDRESS or pass --dbf-address",
             DBF_PARCELS_ADDRESS
         )
         return parcels
@@ -667,33 +890,28 @@ def load_parcel_data() -> Dict[str, dict]:
     try:
         from dbfread import DBF as DbfReader
     except ImportError:
-        logging.warning("dbfread not installed. Run: pip install dbfread")
+        logging.warning("dbfread not installed — run: pip install dbfread")
         return parcels
 
     logging.info("Loading ParcelsAddress.dbf from %s ...", DBF_PARCELS_ADDRESS)
     count = 0
-
     try:
         table = DbfReader(str(DBF_PARCELS_ADDRESS), load=False, encoding="latin-1")
         for row in table:
             try:
                 R = {k.upper(): clean(v) for k, v in dict(row).items()}
-
                 owner_raw = R.get("OWNER", "")
                 prop_raw  = R.get("PROPERTY_A", "")
                 mail_raw  = R.get("MAILING_AD", "")
                 parid     = R.get("PARID", "")
                 luc       = R.get("LUC", "")
-                zoning    = R.get("ZONING", "")
 
-                if not owner_raw and not prop_raw:
-                    continue
+                if not owner_raw and not prop_raw: continue
 
-                prop_street, prop_city, prop_state, prop_zip = _parse_dbf_property_address(prop_raw)
-                mail_street, mail_city, mail_state, mail_zip = _parse_dbf_mailing_address(mail_raw)
+                prop_street, prop_city, prop_state, prop_zip = _parse_prop_addr(prop_raw)
+                mail_street, mail_city, mail_state, mail_zip = _parse_mail_addr(mail_raw)
 
-                if not prop_street:
-                    continue
+                if not prop_street: continue
 
                 rec = {
                     "parcel_id":    parid,
@@ -707,26 +925,20 @@ def load_parcel_data() -> Dict[str, dict]:
                     "mail_state":   mail_state or "OH",
                     "mail_zip":     mail_zip,
                     "luc":          luc,
-                    "zoning":       zoning,
-                    "assessed_value":   None,
+                    "assessed_value": None,
                     "est_market_value": None,
                 }
 
-                # Index 1: property address key
                 addr_key = norm_addr_key(prop_street)
-                if addr_key:
-                    parcels[addr_key] = rec
+                if addr_key: parcels[addr_key] = rec
 
-                # Index 2: all owner name variants (critical for probate name matching)
                 if owner_raw:
                     for v in name_variants(owner_raw):
                         k = f"OWNER:{v}"
-                        if k not in parcels:  # don't overwrite better address matches
-                            parcels[k] = rec
+                        if k not in parcels: parcels[k] = rec
 
                 count += 1
-            except Exception as row_err:
-                logging.debug("DBF row skip: %s", row_err)
+            except Exception: continue
 
     except Exception as e:
         logging.error("Failed to read ParcelsAddress.dbf: %s", e)
@@ -734,82 +946,63 @@ def load_parcel_data() -> Dict[str, dict]:
 
     addr_count  = sum(1 for k in parcels if not k.startswith("OWNER:"))
     owner_count = sum(1 for k in parcels if k.startswith("OWNER:"))
-    logging.info(
-        "Parcel DBF: %s rows loaded | %s address keys | %s owner name keys",
-        count, addr_count, owner_count
-    )
+    logging.info("Parcel DBF: %s rows | %s address keys | %s owner keys",
+                 count, addr_count, owner_count)
     return parcels
 
-def match_parcel(owner: str, prop_address: str, parcels: Dict[str, dict]) -> tuple:
-    """
-    Match a lead to a parcel record.
-    Returns (parcel_dict, method_string) or (None, 'unmatched').
-
-    Priority:
-      1. Exact normalized property address  (most reliable)
-      2. Exact owner name variant match
-      3. Token-sorted name match            (handles word-order differences)
-      4. Last-name/single-token fallback    (individuals only, not corps)
-    """
-    if not parcels:
-        return None, "unmatched"
+def match_parcel(owner: str, prop_address: str,
+                 parcels: Dict[str, dict]) -> tuple:
+    if not parcels: return None, "unmatched"
 
     # 1. Address match
     if prop_address and is_valid_address(prop_address):
         key = norm_addr_key(prop_address)
-        if key and key in parcels:
-            return parcels[key], "address_exact"
+        if key and key in parcels: return parcels[key], "address_exact"
 
-    # 2 & 3 & 4. Name match
+    # 2. Owner name variants
     if owner:
         owner_up = norm_name(owner)
-        variants = name_variants(owner_up)
-
-        # Exact variant
-        for v in variants:
+        for v in name_variants(owner_up):
             k = f"OWNER:{v}"
-            if k in parcels:
-                return parcels[k], "name_exact"
+            if k in parcels: return parcels[k], "name_exact"
 
-        # Token-sorted (catches "JOHN SMITH" vs DBF "SMITH JOHN")
+        # 3. Token-sorted
         tokens_sorted = " ".join(sorted(owner_up.split()))
         if f"OWNER:{tokens_sorted}" in parcels:
             return parcels[f"OWNER:{tokens_sorted}"], "name_token_sorted"
 
-        # Last-name-only fallback for individuals
+        # 4. Last-name fallback
         if not likely_corp(owner):
             parts = [p for p in re.split(r"[\s,]+", owner_up) if len(p) > 2]
             for part in parts:
                 k = f"OWNER:{part}"
-                if k in parcels:
-                    return parcels[k], "name_lastname_only"
+                if k in parcels: return parcels[k], "name_lastname_only"
 
     return None, "unmatched"
 
 def enrich(record: "LeadRecord", parcels: Dict[str, dict]) -> "LeadRecord":
-    """
-    Enrich a lead with parcel data.
-    For PRO/inherited records, also tries decedent_name as the lookup key
-    if the owner match fails — this is the key improvement for probate leads.
-    """
     matched, method = match_parcel(record.owner, record.prop_address, parcels)
 
-    # Probate fallback: try decedent name if owner didn't match
+    # Probate: also try decedent name
     if matched is None and record.doc_type == "PRO" and record.decedent_name:
         matched, method = match_parcel(record.decedent_name, "", parcels)
-        if matched:
-            method = f"probate_{method}"
+        if matched: method = f"probate_{method}"
+
+    # Fallback: Lucas County Auditor API lookup by name
+    if matched is None and record.owner and not likely_corp(record.owner):
+        if not is_boilerplate_name(record.owner):
+            auditor = auditor_lookup_by_name(record.owner)
+            if auditor:
+                matched = auditor
+                method = "auditor_api"
 
     if matched:
-        # Fill property address only if missing or junk
         if not is_valid_address(record.prop_address):
             record.prop_address = matched.get("prop_address", "")
         if not record.prop_city:
             record.prop_city = matched.get("prop_city", "") or "Toledo"
         if not record.prop_zip:
             record.prop_zip = matched.get("prop_zip", "")
-
-        # Always fill mailing from parcel (ground truth — county records)
         if not record.mail_address:
             record.mail_address = matched.get("mail_address", "")
         if not record.mail_city:
@@ -818,8 +1011,6 @@ def enrich(record: "LeadRecord", parcels: Dict[str, dict]) -> "LeadRecord":
             record.mail_state = matched.get("mail_state", "OH")
         if not record.mail_zip:
             record.mail_zip = matched.get("mail_zip", "")
-
-        # Parcel metadata
         if not record.parcel_id:
             record.parcel_id = matched.get("parcel_id", "")
         if not record.luc:
@@ -831,17 +1022,16 @@ def enrich(record: "LeadRecord", parcels: Dict[str, dict]) -> "LeadRecord":
 
         record.match_method = method
         record.match_score = {
-            "address_exact":      1.00,
-            "name_exact":         0.92,
-            "name_token_sorted":  0.85,
-            "name_lastname_only": 0.65,
-        }.get(method.replace("probate_", ""), 0.75)
+            "address_exact": 1.00, "name_exact": 0.92,
+            "name_token_sorted": 0.85, "name_lastname_only": 0.65,
+            "auditor_api": 0.80,
+        }.get(method.replace("probate_",""), 0.75)
 
     # Defaults
-    if not record.prop_city:  record.prop_city  = "Toledo"
+    if not record.prop_city: record.prop_city = "Toledo"
     if not record.prop_state: record.prop_state = "OH"
 
-    # Clear any junk prop_address that slipped through
+    # Clear junk addresses
     if record.prop_address and not is_valid_address(record.prop_address):
         record.prop_address = ""
 
@@ -859,7 +1049,7 @@ def enrich(record: "LeadRecord", parcels: Dict[str, dict]) -> "LeadRecord":
     record.score = score_record(record)
     return record
 
-# ── SCRAPER 1: TLN Common Pleas daily filings ──────────────────────────────
+# ── SCRAPER 1: TLN Common Pleas ───────────────────────────────────────────
 async def scrape_tln_common_pleas() -> List[LeadRecord]:
     records: List[LeadRecord] = []
     seen: set = set()
@@ -867,6 +1057,7 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
 
     html = await pw_fetch(TLN_COMMON_PLEAS_URL, wait_ms=3000)
     if not html: return records
+
     soup = BeautifulSoup(html, "lxml")
     save_debug("tln_cp_index.html", html[:5000])
 
@@ -883,8 +1074,7 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
     for days_back in range(0, 15):
         d = (datetime.now() - timedelta(days=days_back)).strftime("%B-%-d-%Y").lower()
         url = f"{TLN_BASE}/courts/common_pleas/common-pleas-filings-received-on-{d}/"
-        if url not in article_links:
-            article_links.append(url)
+        if url not in article_links: article_links.append(url)
 
     logging.info("TLN CP: %s URLs", len(article_links))
 
@@ -896,6 +1086,7 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
             text = art_soup.get_text(" ")
             if "404" in text[:300] or "not found" in text[:300].lower(): continue
 
+            # ── Pattern 1: Foreclosure with address ────────────────────────
             fc_pat = re.compile(
                 r"(CI[0-9]{4}[0-9]+)\s+(.{5,80}?)\s+vs\.?\s+(.{5,80}?)\.\s+"
                 r".*?(?:foreclosure of mtg on|property located at|premises known as|real estate located at)\s+"
@@ -912,6 +1103,8 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                 prop_address = clean(m.group(4)).title()
                 prop_city  = clean(m.group(5)).title()
                 prop_zip   = clean(m.group(6)) if m.group(6) else ""
+                # Validate defendant name
+                if is_boilerplate_name(defendant): defendant = ""
                 amt_m = re.search(r"\$\s*([\d,]+(?:\.\d{2})?)", text[m.start():m.start()+300])
                 amt   = parse_amount(amt_m.group(1)) if amt_m else None
                 filed = try_parse_date(text[max(0,m.start()-200):m.start()+50]) or datetime.now().date().isoformat()
@@ -926,6 +1119,30 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                     distress_sources=["foreclosure","lis_pendens"],
                 ))
 
+            # ── Pattern 2: Divorce case numbers from CP text ───────────────
+            dr_pat = re.compile(
+                r"(DR[0-9]{4}[0-9\-]+|DM[0-9]+)[;,\s]+([A-Z][A-Za-z\s,\.]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:[;,\.]|\s{2}|$)",
+                re.IGNORECASE
+            )
+            for m in dr_pat.finditer(text):
+                doc_num = clean(m.group(1))
+                if doc_num in seen: continue
+                seen.add(doc_num)
+                plaintiff = clean(m.group(2)).title()
+                defendant = clean(m.group(3)).title()
+                if is_boilerplate_name(plaintiff): continue
+                filed = try_parse_date(text[max(0,m.start()-100):m.start()+50]) or datetime.now().date().isoformat()
+                if not is_recent(filed): continue
+                records.append(LeadRecord(
+                    doc_num=doc_num, doc_type="DIVORCE", filed=filed,
+                    cat="DIVORCE", cat_label="Divorce Filing",
+                    owner=plaintiff, grantee=defendant,
+                    clerk_url=url,
+                    flags=["Divorce filing"],
+                    distress_sources=["divorce"],
+                ))
+
+            # ── Pattern 3: Federal lien "vs" pattern ──────────────────────
             ln_pat = re.compile(
                 r"(LN[0-9]{4}[0-9\-]+)[;,\s]+([^;,\n]{3,80}?)\s+vs\.?\s+([^;,\n\.]{3,60}?)(?:[;,\.]|\s{2}|$)",
                 re.IGNORECASE
@@ -936,7 +1153,7 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                 seen.add(doc_num)
                 plaintiff = clean(m.group(2))
                 owner     = clean(m.group(3)).title()
-                if not owner or len(owner) < 3: continue
+                if not owner or len(owner) < 3 or is_boilerplate_name(owner): continue
                 filed = try_parse_date(text[max(0,m.start()-100):m.start()+50]) or datetime.now().date().isoformat()
                 if not is_recent(filed): continue
                 dt    = infer_doc_type(plaintiff) or "LNFED"
@@ -950,6 +1167,7 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                     distress_sources=[s for s in [classify_distress(dt)] if s],
                 ))
 
+            # ── Pattern 4: Semicolon-delimited lien list ───────────────────
             sc_pat = re.compile(
                 r"(LN[0-9]{4}[0-9\-]+)[;, ]+\$?([\d,\.]+)[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,80})",
                 re.IGNORECASE
@@ -961,10 +1179,10 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                 try: amt = float(m.group(2).replace(",",""))
                 except: amt = None
                 if amt and amt > 10_000_000: continue
-                plaintiff = clean(m.group(3))
-                owner     = clean(m.group(4)).title()
-                addr_raw  = clean(m.group(5))
-                if not owner or len(owner) < 3: continue
+                plaintiff    = clean(m.group(3))
+                owner        = clean(m.group(4)).title()
+                addr_raw     = clean(m.group(5))
+                if not owner or len(owner) < 3 or is_boilerplate_name(owner): continue
                 dt    = infer_doc_type(plaintiff) or "LN"
                 filed = try_parse_date(text[max(0,m.start()-200):m.start()+100]) or datetime.now().date().isoformat()
                 if not is_recent(filed): continue
@@ -999,14 +1217,19 @@ async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
 
     ADDRESS_PAT = re.compile(
         r'(\d{1,5}\s+[A-Za-z][A-Za-z0-9\s\.,#\-]{3,50}),\s+'
-        r'(?:Toledo|Maumee|Perrysburg|Sylvania|Oregon|Waterville|Whitehouse|Holland|Swanton|Maumee),?\s+'
+        r'(?:Toledo|Maumee|Perrysburg|Sylvania|Oregon|Waterville|Whitehouse|Holland|Swanton),?\s+'
         r'OH\s+(\d{5})',
         re.IGNORECASE
     )
-    OWNER_PAT  = re.compile(
-        r'(?:defendant|owner|mortgagor)[s]?[:\s]+([A-Z][A-Za-z\s,\.]{3,50}?)(?:,|\.|whose|last known|and)',
-        re.IGNORECASE
-    )
+    # Improved owner pattern — looks for actual defendant names
+    OWNER_PATTERNS = [
+        # "defendant(s): FIRSTNAME LASTNAME"
+        re.compile(r'(?:defendant|owner|mortgagor)[s]?[:\s]+([A-Z][A-Za-z][A-Za-z\s,\.]{2,50}?)(?:,|\.|whose|last known|and\s+Jane|and\s+John)', re.IGNORECASE),
+        # "vs. DEFENDANT NAME" at start of article
+        re.compile(r'vs\.?\s+([A-Z][A-Za-z][A-Za-z\s,\.]{2,40}?)(?:\s+whose|\s+last|\s+an\s+individual|,|\.|$)', re.IGNORECASE),
+        # "Case No. CI2026-xxxxx PLAINTIFF v DEFENDANT"
+        re.compile(r'CI\d{4}[\-\d]+\s+.{5,60}?\s+v\.?\s+([A-Z][A-Za-z][A-Za-z\s,\.]{2,40}?)(?:,|\.|$)', re.IGNORECASE),
+    ]
     AMOUNT_PAT = re.compile(r'\$([\d,]+(?:\.\d{2})?)')
 
     html = await pw_fetch(TLN_FORECLOSURES_URL, wait_ms=3000)
@@ -1021,8 +1244,7 @@ async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
         if not href or is_noise(text) or is_noise(href): continue
         if "/legal_notices/foreclosures/" in href and "article_" in href:
             full = href if href.startswith("http") else urljoin(TLN_BASE, href)
-            if full not in case_links:
-                case_links.append((text, full))
+            if full not in case_links: case_links.append((text, full))
 
     logging.info("TLN Foreclosure: %s case links found", len(case_links))
 
@@ -1039,20 +1261,31 @@ async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
             art_soup = BeautifulSoup(art_html, "lxml")
             text = art_soup.get_text(" ")
 
+            # Extract address
             addr_m       = ADDRESS_PAT.search(text)
             prop_address = clean(addr_m.group(1)).title() if addr_m else ""
             prop_zip     = addr_m.group(2) if addr_m else ""
             city_m       = re.search(r"(Toledo|Maumee|Perrysburg|Sylvania|Oregon|Waterville|Whitehouse|Holland|Swanton)", text, re.IGNORECASE)
             prop_city    = clean(city_m.group(0)).title() if city_m else "Toledo"
 
-            owner_m = OWNER_PAT.search(text)
-            if owner_m:
-                owner = clean(owner_m.group(1)).title()
-            else:
-                vs_m  = re.search(r"vs\.?\s+([A-Z][A-Za-z\s,\.]{3,50}?)(?:,|\.|and\s+Jane|and\s+John|whose|$)", text, re.IGNORECASE)
-                owner = clean(vs_m.group(1)).title() if vs_m else clean(link_text).title()
-            owner = re.sub(r"^Case\s+No\.?\s+CI[0-9\-]+", "", owner, flags=re.IGNORECASE).strip()
-            if not owner or len(owner) < 3: owner = clean(link_text).title()
+            # Extract owner — try multiple patterns, validate each
+            owner = ""
+            for pat in OWNER_PATTERNS:
+                om = pat.search(text)
+                if om:
+                    candidate = clean(om.group(1)).title()
+                    # Strip trailing junk
+                    candidate = re.sub(r"\s+(?:Case|CI|No\.?)\s+.*$", "", candidate, flags=re.IGNORECASE).strip()
+                    candidate = re.sub(r"\s{2,}.*$", "", candidate).strip()
+                    if not is_boilerplate_name(candidate) and len(candidate) >= 4:
+                        owner = candidate
+                        break
+
+            # Last resort: use link text if it looks like a name
+            if not owner:
+                lt = re.sub(r"case\s+no\.?\s+CI[\d\-]+", "", link_text, flags=re.IGNORECASE).strip()
+                if lt and not is_boilerplate_name(lt) and len(lt) >= 4:
+                    owner = lt.title()
 
             amt_m = AMOUNT_PAT.search(text)
             amt   = parse_amount(amt_m.group(1)) if amt_m else None
@@ -1076,7 +1309,7 @@ async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
     logging.info("TLN Foreclosure Notices: %s records", len(records))
     return records
 
-# ── SCRAPER 3: Sheriff Sale Auction ───────────────────────────────────────
+# ── SCRAPER 3: Sheriff Sales ───────────────────────────────────────────────
 async def scrape_sheriff_sales() -> List[LeadRecord]:
     records: List[LeadRecord] = []
     logging.info("Scraping sheriff sales...")
@@ -1106,15 +1339,14 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
                 if not doc_num or doc_num in seen: continue
                 seen.add(doc_num)
 
-                # Require proper street suffix to avoid junk addresses
+                # Strict address — require street suffix
                 addr_m = re.search(
                     r"(\d{2,5}\s+[A-Z][A-Za-z\s\.]{3,35}"
                     r"(?:ST|AVE|RD|DR|BLVD|LN|CT|PL|WAY|TER|CIR|PKWY|HWY|PIKE)\.?)",
                     item_text, re.IGNORECASE
                 )
                 prop_address = clean(addr_m.group(1)).title() if addr_m else ""
-                if not is_valid_address(prop_address):
-                    prop_address = ""  # will be filled by parcel enrichment
+                if not is_valid_address(prop_address): prop_address = ""
 
                 amt_m = re.search(r"(?:Appraised|Value|Bid)[:\s]*\$?([\d,]+)", item_text, re.IGNORECASE)
                 if not amt_m: amt_m = re.search(r"\$([\d,]+(?:\.\d{2})?)", item_text)
@@ -1130,10 +1362,14 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
                 zip_m     = re.search(r"(43\d{3})", item_text)
                 prop_zip  = zip_m.group(1) if zip_m else ""
 
+                # Extract case owner from sheriff page
+                owner_m = re.search(r"(?:defendant|owner|titled\s+to)[:\s]+([A-Z][A-Za-z\s]{3,40}?)(?:,|\.|$)", item_text, re.IGNORECASE)
+                owner = clean(owner_m.group(1)).title() if owner_m and not is_boilerplate_name(owner_m.group(1)) else ""
+
                 records.append(LeadRecord(
                     doc_num=doc_num, doc_type="SHERIFF", filed=filed,
                     cat="SHERIFF", cat_label="Sheriff Sale",
-                    amount=amt, appraised_value=amt,
+                    owner=owner, amount=amt, appraised_value=amt,
                     prop_address=prop_address, prop_city=prop_city,
                     prop_state="OH", prop_zip=prop_zip,
                     sheriff_sale_date=sale_date, clerk_url=url,
@@ -1142,7 +1378,6 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
                     distress_count=2, hot_stack=True,
                     with_address=1 if is_valid_address(prop_address) else 0,
                 ))
-
             await asyncio.sleep(1.5)
         except Exception as e:
             logging.warning("Sheriff %s: %s", url[-60:], e)
@@ -1152,11 +1387,6 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
 
 # ── SCRAPER 4: TLN Probate ────────────────────────────────────────────────
 async def scrape_tln_probate() -> List[LeadRecord]:
-    """
-    Scrapes TLN probate filings. Marks all records is_inherited=True.
-    Property + mailing addresses are filled in during enrich() by matching
-    decedent_name against the OWNER field in ParcelsAddress.dbf.
-    """
     records: List[LeadRecord] = []
     logging.info("Scraping probate...")
     try:
@@ -1209,96 +1439,207 @@ async def scrape_tln_probate() -> List[LeadRecord]:
     logging.info("Probate: %s", len(records))
     return records
 
-# ── SCRAPER 5: TLN Divorces ───────────────────────────────────────────────
-async def scrape_tln_divorces() -> List[LeadRecord]:
+# ── SCRAPER 5: Divorces ────────────────────────────────────────────────────
+async def scrape_divorces() -> List[LeadRecord]:
+    """
+    Multi-source divorce scraping:
+    1. TLN domestic court page (may require login — gets what it can)
+    2. Lucas County Common Pleas public search for DR cases
+    3. DR case numbers already captured in TLN common pleas scraper
+    """
     records: List[LeadRecord] = []
     seen: set = set()
-    logging.info("Scraping divorces...")
+    logging.info("Scraping divorces (multi-source)...")
+
+    # Source 1: TLN domestic
     try:
         html = await pw_fetch(TLN_DOMESTIC_URL, wait_ms=3000)
-        if not html: return records
-        soup      = BeautifulSoup(html, "lxml")
-        all_texts = [soup.get_text(" ")]
+        if html:
+            soup = BeautifulSoup(html, "lxml")
+            all_texts = [soup.get_text(" ")]
+            links = []
+            for a in soup.select("a[href]"):
+                href = clean(a.get("href",""))
+                if not href: continue
+                if href.startswith("mailto:") or "wa.me" in href: continue
+                if "article_" in href or "domestic" in href or "filings" in href:
+                    full = href if href.startswith("http") else urljoin(TLN_BASE, href)
+                    if "toledolegalnews.com" in full: links.append(full)
+            for link in links[:8]:
+                try:
+                    ah = await pw_fetch(link, wait_ms=1500)
+                    if ah: all_texts.append(BeautifulSoup(ah, "lxml").get_text(" "))
+                    await asyncio.sleep(1)
+                except: pass
 
-        links = []
-        for a in soup.select("a[href]"):
-            href = clean(a.get("href",""))
-            if not href: continue
-            if href.startswith("mailto:") or "wa.me" in href or "facebook.com" in href: continue
-            if "article_" in href or "domestic" in href or "filings" in href:
-                full = href if href.startswith("http") else urljoin(TLN_BASE, href)
-                if "toledolegalnews.com" in full: links.append(full)
-
-        for link in links[:8]:
-            try:
-                ah = await pw_fetch(link, wait_ms=1500)
-                if ah: all_texts.append(BeautifulSoup(ah, "lxml").get_text(" "))
-                await asyncio.sleep(1)
-            except: pass
-
-        for text in all_texts:
             dr_pat = re.compile(
                 r"(DR[0-9]{4}[0-9\-]+|DM[0-9]+)[;,\s]+([A-Z][A-Za-z\s,\.]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:[;,\.]|\s{2}|$)",
                 re.IGNORECASE
             )
-            for m in dr_pat.finditer(text):
-                doc_num = clean(m.group(1))
+            for text in all_texts:
+                for m in dr_pat.finditer(text):
+                    doc_num = clean(m.group(1))
+                    if doc_num in seen: continue
+                    seen.add(doc_num)
+                    plaintiff = clean(m.group(2)).title()
+                    defendant = clean(m.group(3)).title()
+                    if is_boilerplate_name(plaintiff): continue
+                    filed = try_parse_date(text[max(0,m.start()-100):m.start()+50]) or datetime.now().date().isoformat()
+                    if not is_recent(filed): continue
+                    records.append(LeadRecord(
+                        doc_num=doc_num, doc_type="DIVORCE", filed=filed,
+                        cat="DIVORCE", cat_label="Divorce Filing",
+                        owner=plaintiff, grantee=defendant,
+                        clerk_url=TLN_DOMESTIC_URL,
+                        flags=["Divorce filing"], distress_sources=["divorce"],
+                    ))
+    except Exception as e:
+        logging.warning("TLN domestic failed: %s", e)
+
+    # Source 2: Lucas County Common Pleas public app — DR division
+    try:
+        # Lucas County has a public case search with no auth
+        for days_back in range(0, 14):
+            d = (datetime.now() - timedelta(days=days_back)).strftime("%m/%d/%Y")
+            url = f"http://lcapps.co.lucas.oh.us/CPC/CaseSearch.aspx?court=DR&fromdate={d}&todate={d}"
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code != 200: continue
+            soup = BeautifulSoup(r.text, "lxml")
+            text = soup.get_text(" ")
+            dr_pat2 = re.compile(
+                r"(DR\s*\d{4}\s*\d{4,}|DM\s*\d{4}\s*\d{4,})\s+([A-Z][A-Za-z\s,]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,]{3,40}?)(?:\s|$|,|\.)",
+                re.IGNORECASE
+            )
+            for m in dr_pat2.finditer(text):
+                doc_num = re.sub(r"\s+","",clean(m.group(1)))
                 if doc_num in seen: continue
                 seen.add(doc_num)
                 plaintiff = clean(m.group(2)).title()
-                defendant = clean(m.group(3)).title()
-                filed = try_parse_date(text[max(0,m.start()-100):m.start()+50]) or datetime.now().date().isoformat()
-                if not is_recent(filed): continue
+                if is_boilerplate_name(plaintiff): continue
                 records.append(LeadRecord(
-                    doc_num=doc_num, doc_type="DIVORCE", filed=filed,
+                    doc_num=doc_num, doc_type="DIVORCE",
+                    filed=datetime.now().date().isoformat(),
                     cat="DIVORCE", cat_label="Divorce Filing",
-                    owner=plaintiff, grantee=defendant,
-                    clerk_url=TLN_DOMESTIC_URL,
-                    flags=["Divorce filing"],
-                    distress_sources=["divorce"],
+                    owner=plaintiff, grantee=clean(m.group(3)).title(),
+                    clerk_url=url,
+                    flags=["Divorce filing"], distress_sources=["divorce"],
                 ))
+            await asyncio.sleep(0.5)
     except Exception as e:
-        logging.warning("Divorce scrape failed: %s", e)
+        logging.debug("LC CPC divorce search: %s", e)
+
     logging.info("Divorces: %s", len(records))
     return records
 
-# ── SCRAPER 6: Tax Delinquent ─────────────────────────────────────────────
+# ── SCRAPER 6: Tax Delinquent ──────────────────────────────────────────────
 async def scrape_tax_delinquent() -> List[LeadRecord]:
+    """
+    Multi-source tax delinquent:
+    1. Lucas County Treasurer delinquent list
+    2. TLN tax foreclosure articles (TF case numbers)
+    3. Lucas County Auditor delinquent data if available
+    """
     records: List[LeadRecord] = []
-    logging.info("Scraping tax delinquent...")
-    tax_urls = [
-        "https://www.lucascountytreasurer.org/delinquent-taxes",
-        "https://www.toledolegalnews.com/legal_notices/foreclosures/",
-    ]
-    seen   = set()
-    tf_pat = re.compile(r"(TF[0-9]{4}[0-9\-]+|TF\s*[0-9]{6,})\s+(.{10,80}?)\s+\$?([\d,]+(?:\.\d{2})?)?", re.IGNORECASE)
+    seen = set()
+    logging.info("Scraping tax delinquent (multi-source)...")
 
-    for url in tax_urls:
-        try:
-            html = await pw_fetch(url, wait_ms=3000)
-            if not html or len(html) < 500: continue
+    # Source 1: Lucas County Treasurer
+    try:
+        html = await pw_fetch(LC_TREASURER_URL, wait_ms=4000)
+        if html and len(html) > 500:
             soup = BeautifulSoup(html, "lxml")
             text = soup.get_text(" ")
+            save_debug("treasurer_page.txt", text[:5000])
+
+            # Look for parcel/address patterns on treasurer page
+            # Pattern: parcel number + owner + amount
+            par_pat = re.compile(
+                r"(\d{2}-\d{5}-\d{3}-\d{3}-\d{3}|\d{14})\s+"  # Lucas County parcel format
+                r"([A-Z][A-Za-z\s,\.]{3,40}?)\s+"
+                r"\$?([\d,]+(?:\.\d{2})?)",
+                re.IGNORECASE
+            )
+            for m in par_pat.finditer(text):
+                parcel_id = clean(m.group(1))
+                owner     = clean(m.group(2)).title()
+                if parcel_id in seen or is_boilerplate_name(owner): continue
+                seen.add(parcel_id)
+                try: amt = float(m.group(3).replace(",",""))
+                except: amt = None
+                records.append(LeadRecord(
+                    doc_num=f"TAX-{parcel_id}",
+                    doc_type="TAX", filed=datetime.now().date().isoformat(),
+                    cat="TAX", cat_label="Tax Delinquent",
+                    owner=owner, amount=amt, parcel_id=parcel_id,
+                    prop_city="Toledo", prop_state="OH",
+                    clerk_url=LC_TREASURER_URL,
+                    flags=["Tax delinquent","Tax lien"],
+                    distress_sources=["tax_delinquent"],
+                ))
+
+            # Also look for address + amount patterns
+            addr_amt_pat = re.compile(
+                r"(\d{1,5}\s+[A-Za-z][A-Za-z\s\.]{3,25}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL)\.?)\s+"
+                r"[A-Za-z\s,]{3,40}?\s+\$?([\d,]+(?:\.\d{2})?)",
+                re.IGNORECASE
+            )
+            for m in addr_amt_pat.finditer(text):
+                addr = clean(m.group(1)).title()
+                key = norm_addr_key(addr)
+                if key in seen: continue
+                seen.add(key)
+                try: amt = float(m.group(2).replace(",",""))
+                except: amt = None
+                if not amt or amt < 100: continue
+                records.append(LeadRecord(
+                    doc_num=f"TAX-ADDR-{len(records)+1:04d}",
+                    doc_type="TAX", filed=datetime.now().date().isoformat(),
+                    cat="TAX", cat_label="Tax Delinquent",
+                    amount=amt, prop_address=addr,
+                    prop_city="Toledo", prop_state="OH",
+                    clerk_url=LC_TREASURER_URL,
+                    flags=["Tax delinquent","Tax lien"],
+                    distress_sources=["tax_delinquent"],
+                ))
+    except Exception as e:
+        logging.warning("Treasurer page failed: %s", e)
+
+    # Source 2: TLN tax foreclosure articles
+    try:
+        html = await pw_fetch(TLN_FORECLOSURES_URL, wait_ms=3000)
+        if html:
+            soup = BeautifulSoup(html, "lxml")
+            text = soup.get_text(" ")
+            # TF case numbers = tax foreclosures
+            tf_pat = re.compile(
+                r"(TF[0-9]{4}[0-9\-]+|TF\s*[0-9]{6,})\s+"
+                r"(.{10,80}?)\s+\$?([\d,]+(?:\.\d{2})?)?",
+                re.IGNORECASE
+            )
             for m in tf_pat.finditer(text):
                 doc_num = re.sub(r"\s+","",clean(m.group(1)))
                 if doc_num in seen: continue
                 seen.add(doc_num)
                 try: amt = float(m.group(3).replace(",","")) if m.group(3) else None
                 except: amt = None
-                addr_m = re.search(r"(\d{2,5}\s+[A-Za-z][A-Za-z\s\.]{3,25}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL)\.?)", clean(m.group(2)), re.IGNORECASE)
+                raw = clean(m.group(2))
+                addr_m = re.search(r"(\d{2,5}\s+[A-Za-z][A-Za-z\s\.]{3,25}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL)\.?)", raw, re.IGNORECASE)
+                prop_address = clean(addr_m.group(1)).title() if addr_m else ""
+                # Extract owner from surrounding text
+                owner_m = re.search(r"(?:owner|titled\s+to)[:\s]+([A-Z][A-Za-z\s]{3,35}?)(?:,|\.|$)", raw, re.IGNORECASE)
+                owner = clean(owner_m.group(1)).title() if owner_m else ""
                 records.append(LeadRecord(
                     doc_num=doc_num, doc_type="TAX",
                     filed=datetime.now().date().isoformat(),
                     cat="TAX", cat_label="Tax Delinquent",
-                    amount=amt,
-                    prop_address=clean(addr_m.group(1)).title() if addr_m else "",
-                    prop_city="Toledo", prop_state="OH", clerk_url=url,
+                    owner=owner, amount=amt, prop_address=prop_address,
+                    prop_city="Toledo", prop_state="OH",
+                    clerk_url=TLN_FORECLOSURES_URL,
                     flags=["Tax delinquent","Tax lien"],
                     distress_sources=["tax_delinquent"],
                 ))
-            if records: break
-        except Exception as e:
-            logging.warning("Tax delin %s: %s", url[:60], e)
+    except Exception as e:
+        logging.warning("TLN TF pattern: %s", e)
 
     logging.info("Tax delinquent: %s", len(records))
     return records
@@ -1321,7 +1662,7 @@ def cross_stack(records: List[LeadRecord]) -> List[LeadRecord]:
             r.distress_sources = list(set(list(r.distress_sources or []) + list(all_sources)))
             r.distress_count   = len(r.distress_sources)
             r.hot_stack        = True
-            if "Hot Stack" not in " ".join(r.flags):       r.flags.append("Hot Stack")
+            if "Hot Stack" not in " ".join(r.flags): r.flags.append("Hot Stack")
             if "Cross-List Match" not in " ".join(r.flags): r.flags.append("Cross-List Match")
             r = estimate_financials(r); r.score = score_record(r); records[i] = r
         stacked += 1
@@ -1350,29 +1691,31 @@ def write_json(path: Path, payload: dict):
 
 def build_payload(records: List[LeadRecord]) -> dict:
     return {
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source": SOURCE_NAME,
+        "fetched_at":   datetime.now(timezone.utc).isoformat(),
+        "source":       SOURCE_NAME,
         "date_range": {
             "from": (datetime.now()-timedelta(days=LOOKBACK_DAYS)).date().isoformat(),
             "to":   datetime.now().date().isoformat(),
         },
-        "total":               len(records),
-        "with_address":        sum(1 for r in records if is_valid_address(r.prop_address)),
-        "hot_stack_count":     sum(1 for r in records if r.hot_stack),
-        "sheriff_sale_count":  sum(1 for r in records if r.doc_type=="SHERIFF"),
-        "probate_count":       sum(1 for r in records if r.doc_type=="PRO"),
-        "inherited_count":     sum(1 for r in records if r.is_inherited),
-        "tax_delinquent_count":sum(1 for r in records if r.doc_type=="TAX"),
-        "foreclosure_count":   sum(1 for r in records if r.doc_type in {"NOFC","LP"}),
-        "lien_count":          sum(1 for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX"}),
-        "absentee_count":      sum(1 for r in records if r.is_absentee),
-        "out_of_state_count":  sum(1 for r in records if r.is_out_of_state),
-        "subject_to_count":    sum(1 for r in records if r.subject_to_score>=50),
-        "divorce_count":       sum(1 for r in records if r.doc_type=="DIVORCE"),
+        "total":                len(records),
+        "with_address":         sum(1 for r in records if is_valid_address(r.prop_address)),
+        "hot_stack_count":      sum(1 for r in records if r.hot_stack),
+        "sheriff_sale_count":   sum(1 for r in records if r.doc_type=="SHERIFF"),
+        "probate_count":        sum(1 for r in records if r.doc_type=="PRO"),
+        "inherited_count":      sum(1 for r in records if r.is_inherited),
+        "tax_delinquent_count": sum(1 for r in records if r.doc_type=="TAX"),
+        "foreclosure_count":    sum(1 for r in records if r.doc_type in {"NOFC","LP"}),
+        "lien_count":           sum(1 for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX"}),
+        "absentee_count":       sum(1 for r in records if r.is_absentee),
+        "out_of_state_count":   sum(1 for r in records if r.is_out_of_state),
+        "subject_to_count":     sum(1 for r in records if r.subject_to_score>=50),
+        "divorce_count":        sum(1 for r in records if r.doc_type=="DIVORCE"),
+        "redfin_enriched_count":sum(1 for r in records if r.redfin_value),
         "zillow_enriched_count":sum(1 for r in records if r.zillow_value),
-        "zillow_api_calls":    ZILLOW_CALLS,
-        "parcel_matched_count":sum(1 for r in records if r.match_method != "unmatched"),
-        "records":             [asdict(r) for r in records],
+        "redfin_calls":         REDFIN_CALLS,
+        "zillow_api_calls":     ZILLOW_CALLS,
+        "parcel_matched_count": sum(1 for r in records if r.match_method != "unmatched"),
+        "records":              [asdict(r) for r in records],
     }
 
 def write_category_json(records: List[LeadRecord]):
@@ -1389,13 +1732,16 @@ def write_category_json(records: List[LeadRecord]):
         "out_of_state":    [r for r in records if r.is_out_of_state],
         "subject_to":      [r for r in records if r.subject_to_score>=50],
         "divorces":        [r for r in records if r.doc_type=="DIVORCE"],
-        "zillow_valued":   [r for r in records if r.zillow_value],
+        "code_violations": [r for r in records if r.doc_type=="CODEVIOLATION"],
+        "vacant_homes":    [r for r in records if r.is_vacant_home],
+        "vacant_land":     [r for r in records if r.is_vacant_land],
+        "evictions":       [r for r in records if r.doc_type=="EVICTION"],
     }
     descs = {
         "hot_stack":       "2+ distress signals - highest priority",
         "sheriff_sales":   "Properties scheduled for sheriff auction",
         "probate":         "Estate / probate filings",
-        "inherited":       "Inherited / estate properties enriched with parcel addresses",
+        "inherited":       "Inherited / estate properties with address enrichment",
         "tax_delinquent":  "Tax delinquent / tax foreclosure",
         "foreclosure":     "Active foreclosure / lis pendens / tax deed",
         "pre_foreclosure": "Pre-foreclosure and lis pendens filings",
@@ -1404,16 +1750,17 @@ def write_category_json(records: List[LeadRecord]):
         "out_of_state":    "Out-of-state owner",
         "subject_to":      "Subject-To candidates (score 50+)",
         "divorces":        "Divorce / dissolution filings",
-        "zillow_valued":   "Leads with Zillow home value estimates",
+        "code_violations": "Code violations / nuisance orders",
+        "vacant_homes":    "Vacant homes",
+        "vacant_land":     "Vacant / vacant land",
+        "evictions":       "Eviction filings",
     }
     for cat, recs in categories.items():
         recs_s  = sorted(recs, key=lambda r:(r.hot_stack,r.distress_count,r.subject_to_score,r.score), reverse=True)
         payload = {
             "fetched_at":  datetime.now(timezone.utc).isoformat(),
-            "source":      SOURCE_NAME,
-            "category":    cat,
-            "description": descs.get(cat,""),
-            "total":       len(recs_s),
+            "source":      SOURCE_NAME, "category": cat,
+            "description": descs.get(cat,""), "total": len(recs_s),
             "records":     [asdict(r) for r in recs_s],
         }
         for path in [DATA_DIR/f"{cat}.json", DASHBOARD_DIR/f"{cat}.json"]:
@@ -1428,7 +1775,8 @@ def write_csv(records: List[LeadRecord], csv_path: Path):
         "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
         "Seller Score","Subject-To Score","Motivated Seller Flags","Distress Sources","Distress Count",
         "Hot Stack","Absentee Owner","Out-of-State Owner","Inherited",
-        "Assessed Value","Est Market Value","Zillow Value","Value Source",
+        "Assessed Value","Est Market Value","Redfin AVM","Zillow Value","Value Source",
+        "Beds","Baths","Sq Ft","Last Sale Price","Last Sale Year",
         "Est Equity","Est Arrears","Est Payoff","Mortgage Signals",
         "Parcel ID","LUC Code","Match Method","Match Score","Source","Public Records URL",
     ]
@@ -1450,17 +1798,21 @@ def write_csv(records: List[LeadRecord], csv_path: Path):
                 "Motivated Seller Flags":"; ".join(r.flags),
                 "Distress Sources":"; ".join(r.distress_sources),
                 "Distress Count":r.distress_count,
-                "Hot Stack":      "YES" if r.hot_stack else "",
-                "Absentee Owner": "YES" if r.is_absentee else "",
+                "Hot Stack":"YES" if r.hot_stack else "",
+                "Absentee Owner":"YES" if r.is_absentee else "",
                 "Out-of-State Owner":"YES" if r.is_out_of_state else "",
-                "Inherited":      "YES" if r.is_inherited else "",
+                "Inherited":"YES" if r.is_inherited else "",
                 "Assessed Value": f"${r.assessed_value:,.0f}" if r.assessed_value else "",
-                "Est Market Value":f"${r.estimated_value:,.0f}" if r.estimated_value else "",
-                "Zillow Value":   f"${r.zillow_value:,.0f}" if r.zillow_value else "",
+                "Est Market Value": f"${r.estimated_value:,.0f}" if r.estimated_value else "",
+                "Redfin AVM": f"${r.redfin_value:,.0f}" if r.redfin_value else "",
+                "Zillow Value": f"${r.zillow_value:,.0f}" if r.zillow_value else "",
                 "Value Source":r.value_source,
-                "Est Equity":  f"${r.est_equity:,.0f}" if r.est_equity is not None else "",
+                "Beds":r.beds or "", "Baths":r.baths or "", "Sq Ft":r.sqft or "",
+                "Last Sale Price": f"${r.last_sale_price:,.0f}" if r.last_sale_price else "",
+                "Last Sale Year":r.last_sale_year or "",
+                "Est Equity": f"${r.est_equity:,.0f}" if r.est_equity is not None else "",
                 "Est Arrears": f"${r.est_arrears:,.0f}" if r.est_arrears else "",
-                "Est Payoff":  f"${r.est_payoff:,.0f}" if r.est_payoff else "",
+                "Est Payoff": f"${r.est_payoff:,.0f}" if r.est_payoff else "",
                 "Mortgage Signals":"; ".join(r.mortgage_signals),
                 "Parcel ID":r.parcel_id, "LUC Code":r.luc,
                 "Match Method":r.match_method, "Match Score":f"{r.match_score:.2f}",
@@ -1470,44 +1822,47 @@ def write_csv(records: List[LeadRecord], csv_path: Path):
 
 # ── Main ───────────────────────────────────────────────────────────────────
 async def main():
-    ap = argparse.ArgumentParser(description="Toledo / Lucas County Motivated Seller Scraper")
+    ap = argparse.ArgumentParser(description="Toledo / Lucas County Motivated Seller Scraper v3")
     ap.add_argument("--out-csv",     default=str(DEFAULT_ENRICHED_CSV_PATH))
     ap.add_argument("--dbf-address", default="",
-                    help="Full path to ParcelsAddress.dbf (overrides DBF_PARCELS_ADDRESS env var)")
+                    help="Full path to ParcelsAddress.dbf")
     args = ap.parse_args()
 
-    # Allow CLI override of DBF path
     global DBF_PARCELS_ADDRESS
     if args.dbf_address:
         DBF_PARCELS_ADDRESS = Path(args.dbf_address)
 
     ensure_dirs()
     log_setup()
-    logging.info("=== Toledo / Lucas County Motivated Seller Intelligence v2 ===")
-    logging.info("Zillow API   : %s", "ENABLED" if ZILLOW_API_KEY else "DISABLED (set ZILLOW_API_KEY)")
-    logging.info("Parcel DBF   : %s", DBF_PARCELS_ADDRESS)
+    logging.info("=== Toledo / Lucas County Motivated Seller Intelligence v3 ===")
+    logging.info("Zillow API  : %s", "ENABLED" if ZILLOW_API_KEY else "DISABLED")
+    logging.info("Redfin AVM  : ENABLED (free, no key needed)")
+    logging.info("Parcel DBF  : %s", DBF_PARCELS_ADDRESS)
+    logging.info("DBF exists  : %s", DBF_PARCELS_ADDRESS.exists())
 
-    # 1. Load local parcel DBF
+    # 1. Load parcel DBF
     parcels = load_parcel_data()
     if not parcels:
         logging.warning(
-            "No parcel data loaded — absentee/OOS/SubTo/address enrichment will be empty.\n"
-            "  Pass: --dbf-address /path/to/ParcelsAddress.dbf\n"
-            "  OR copy file to: data/parcels/ParcelsAddress.dbf"
+            "No DBF parcel data — using auditor API fallback for address lookup.\n"
+            "For full enrichment: pass --dbf-address /path/to/ParcelsAddress.dbf"
         )
 
-    # 2. Run all scrapers
-    cp_records   = await scrape_tln_common_pleas()
-    fc_records   = await scrape_tln_foreclosure_notices()
-    sheriff_recs = await scrape_sheriff_sales()
-    probate_recs = await scrape_tln_probate()
-    divorce_recs = await scrape_tln_divorces()
-    tax_recs     = await scrape_tax_delinquent()
+    # 2. Run all scrapers concurrently where possible
+    cp_records, fc_records, sheriff_recs, probate_recs, divorce_recs, tax_recs = await asyncio.gather(
+        scrape_tln_common_pleas(),
+        scrape_tln_foreclosure_notices(),
+        scrape_sheriff_sales(),
+        scrape_tln_probate(),
+        scrape_divorces(),
+        scrape_tax_delinquent(),
+        return_exceptions=False
+    )
 
     all_records = cp_records + fc_records + sheriff_recs + probate_recs + divorce_recs + tax_recs
     logging.info("Total before enrich: %s", len(all_records))
 
-    # 3. Enrich with parcel data + Zillow + scoring
+    # 3. Enrich (parcel + auditor API + Redfin + scoring)
     enriched = []
     for r in all_records:
         try:
@@ -1528,8 +1883,8 @@ async def main():
 
     parcel_matched = sum(1 for r in all_records if r.match_method != "unmatched")
     logging.info(
-        "Total final: %s | Parcel matched: %s | Zillow calls: %s/%s",
-        len(all_records), parcel_matched, ZILLOW_CALLS, ZILLOW_MAX_CALLS
+        "Total final: %s | Parcel matched: %s | Redfin: %s | Zillow: %s/%s",
+        len(all_records), parcel_matched, REDFIN_CALLS, ZILLOW_CALLS, ZILLOW_MAX_CALLS
     )
 
     # 5. Write outputs
@@ -1545,15 +1900,14 @@ async def main():
 
     logging.info(
         "=== DONE === Total:%s | Sheriff:%s | HotStack:%s | Probate:%s | "
-        "PreFC:%s | FC(all):%s | Liens:%s | Tax:%s | "
-        "Absentee:%s | OOS:%s | SubTo:%s | Inherited:%s | "
-        "Divorce:%s | ZillowValued:%s | ParcelMatched:%s",
+        "PreFC:%s | Liens:%s | Tax:%s | Absentee:%s | OOS:%s | "
+        "SubTo:%s | Inherited:%s | Divorce:%s | "
+        "RedfinValued:%s | ZillowValued:%s | ParcelMatched:%s",
         len(all_records),
         sum(1 for r in all_records if r.doc_type=="SHERIFF"),
         sum(1 for r in all_records if r.hot_stack),
         sum(1 for r in all_records if r.doc_type=="PRO"),
         sum(1 for r in all_records if r.doc_type in {"NOFC","LP"}),
-        sum(1 for r in all_records if r.doc_type in {"NOFC","LP","TAXDEED"}),
         sum(1 for r in all_records if r.doc_type in {"LN","LNMECH","LNFED"}),
         sum(1 for r in all_records if r.doc_type=="TAX"),
         sum(1 for r in all_records if r.is_absentee),
@@ -1561,6 +1915,7 @@ async def main():
         sum(1 for r in all_records if r.subject_to_score>=50),
         sum(1 for r in all_records if r.is_inherited),
         sum(1 for r in all_records if r.doc_type=="DIVORCE"),
+        sum(1 for r in all_records if r.redfin_value),
         sum(1 for r in all_records if r.zillow_value),
         parcel_matched,
     )
