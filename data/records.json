@@ -1,63 +1,9 @@
 {
-  "fetched_at": "2026-04-13T03:51:43.918425",
+  "fetched_at": "2026-04-13T04:10:16.252332",
   "source": "Lucas County, OH",
-  "total": 77,
+  "total": 62,
   "records": [
     {
-      "owner": "Annual Reports",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/annual_reports/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Dissolutions",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/dissolutions/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Divorce",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/divorce/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
       "owner": "Notice of Foreclosure Complaints",
       "doc_type": "Foreclosure",
       "case_num": "UNKNOWN",
@@ -94,64 +40,10 @@
       "score": 90
     },
     {
-      "owner": "Name Changes",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/name_changes/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Bid Notices",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/bid/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
       "owner": "Private Seller Auctions",
       "doc_type": "Foreclosure",
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/public_auctions/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Public Hearings",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/public_hearings/",
       "filed": "2026-04-13",
       "prop_address": "Pending Lookup",
       "prop_city": "Toledo",
@@ -202,78 +94,6 @@
       "score": 90
     },
     {
-      "owner": "Zoning",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/zoning/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Annual Reports",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/annual_reports/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Dissolutions",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/dissolutions/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Divorce",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/divorce/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
       "owner": "Notice of Foreclosure Complaints",
       "doc_type": "Foreclosure",
       "case_num": "UNKNOWN",
@@ -310,64 +130,10 @@
       "score": 90
     },
     {
-      "owner": "Name Changes",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/name_changes/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Bid Notices",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/bid/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
       "owner": "Private Seller Auctions",
       "doc_type": "Foreclosure",
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/public_auctions/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Public Hearings",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/public_hearings/",
       "filed": "2026-04-13",
       "prop_address": "Pending Lookup",
       "prop_city": "Toledo",
@@ -404,24 +170,6 @@
       "doc_type": "Foreclosure",
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosure_sherrif_sales_wood/",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
-    },
-    {
-      "owner": "Zoning",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://www.toledolegalnews.com/legal_notices/zoning/",
       "filed": "2026-04-13",
       "prop_address": "Pending Lookup",
       "prop_city": "Toledo",
@@ -456,10 +204,10 @@
     {
       "owner": "Case No. CI202600769",
       "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
+      "case_num": "CI202600769",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci202600769/article_4507925f-2f83-45a5-a691-584bbba55086.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "617 Northfield Drive, Maumee, OH 43537",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -469,25 +217,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
-    },
-    {
-      "owner": "WhatsApp",
-      "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
-      "clerk_url": "https://wa.me/?text=https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci202600769/article_4507925f-2f83-45a5-a691-584bbba55086.html",
-      "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
-      "prop_city": "Toledo",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "assessed_value": 0.0,
-      "market_value": 0.0,
-      "parcel_id": "Pending",
-      "flags": [
-        "Pre-foreclosure"
-      ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-02518",
@@ -495,7 +225,7 @@
       "case_num": "CI2025-02518",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02518/article_35c0a721-ffb4-4647-a621-be3376c3af5c.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "5105 Kellogg Road, Toledo, OH 43615 but whose present place of residence is unknown, will take notice that on July 11, 2025, U.S. Bank Trust National Association, as Trustee for Towd Point Master Funding Trust 2025-DC3, filed its Complaint and on February 26, 2026, the Amended Complaint in Foreclosure in Case No. CI2025-02518 in the Court of Common Pleas Lucas County, Ohio alleging that the Defendants, Unknown Heirs at Law, Devisees, Legatees, Administrators, and Executors of the Estate of Sandra L. Mills and Teresa Clark, have or claim to have an interest in the real estate located at 5105 Kellogg Road, Toledo, OH 43615",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -505,7 +235,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04139",
@@ -513,7 +243,7 @@
       "case_num": "CI2025-04139",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04139/article_f5d29732-71b2-4e16-91e2-9be31e6f240d.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1938 Welker Ave., Toledo, OH 43613",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -523,7 +253,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "CI2025-04148",
@@ -531,7 +261,7 @@
       "case_num": "CI2025-04148",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/ci2025-04148/article_b8beaaa1-0baa-403f-adbe-1058fb49b879.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "210 Favony Avenue, Toledo, OH 43615",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -541,7 +271,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-03999",
@@ -549,7 +279,7 @@
       "case_num": "CI2025-03999",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-03999/article_96d2eeb8-62ec-4fca-aaa4-5089e462a664.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -559,15 +289,15 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI202600503",
       "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
+      "case_num": "CI202600503",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci202600503/article_0de9d3bd-253a-4653-b162-e92033332b16.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "2114 Calumet Avenue, Toledo, OH 43607",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -577,7 +307,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00504",
@@ -600,7 +330,7 @@
     {
       "owner": "Case No. CI2026000423",
       "doc_type": "Foreclosure",
-      "case_num": "UNKNOWN",
+      "case_num": "CI202600042",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026000423/article_fcfb2fb6-5eda-4226-91af-ae779ad6e12a.html",
       "filed": "2026-04-13",
       "prop_address": "Pending Lookup",
@@ -621,7 +351,7 @@
       "case_num": "CI2025-04325",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04325/article_a76dfaa4-579f-41ab-ab61-5a973c1ffb4f.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1548 Primrose Avenue, Toledo, OH 43612",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -631,7 +361,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00264",
@@ -639,7 +369,7 @@
       "case_num": "CI2026-00264",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00264/article_abb53974-0308-4b98-afef-fe884288d4e4.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "5204 Harvest Lane, Toledo, OH 43623",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -649,7 +379,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -657,7 +387,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_6bf04586-230a-4816-8813-4aa564115271.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "916 Miller, Toledo, OH 43607",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -667,7 +397,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00228",
@@ -675,7 +405,7 @@
       "case_num": "CI2026-00228",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00228/article_bf5631b9-22bc-48e1-a66f-0c0792d19617.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "965 Fries Avenue, Toledo, OH 43609",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -685,7 +415,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "CI2026-00048",
@@ -693,7 +423,7 @@
       "case_num": "CI2026-00048",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/ci2026-00048/article_16add18e-0f93-4259-92b5-77d693bdd691.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "3040 Maeterlinck Ave, Toledo, OH 43614",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -703,7 +433,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00640",
@@ -711,7 +441,7 @@
       "case_num": "CI2026-00640",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00640/article_dcc29652-22f2-444b-80d1-99b6f9e0361c.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "00640 in the Court of Common Pleas of Lucas County, 700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -721,7 +451,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00389",
@@ -747,7 +477,7 @@
       "case_num": "CI2025-04718",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04718/article_37129375-df27-46f9-b194-0d2f422e27bb.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -757,7 +487,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04584",
@@ -783,7 +513,7 @@
       "case_num": "CI2026-00704",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00704/article_3beceaa2-59e0-4090-baaf-2e98ef0da37f.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -793,7 +523,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04005",
@@ -801,7 +531,7 @@
       "case_num": "CI2025-04005",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04005/article_ef6f0c46-4969-492c-b589-440cb62e78a9.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "5675 Swan Creek Drive, Toledo, OH 43614",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -811,7 +541,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -819,7 +549,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_e45fbd96-c71e-4e62-a57b-be2ccf738752.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "665 Stebbins St, Toledo, OH 43609",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -829,7 +559,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -855,7 +585,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_fd4c83ba-dca0-4776-a188-598ee67060cc.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1402 Goodale Ave., Toledo, OH 43606",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -865,7 +595,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04719",
@@ -873,7 +603,7 @@
       "case_num": "CI2025-04719",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04719/article_75cceab8-5f6a-4098-8947-e4bf0a7607b9.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -883,7 +613,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04667",
@@ -891,7 +621,7 @@
       "case_num": "CI2025-04667",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04667/article_7385238d-14d7-43c2-8f8d-08a3a16fbf95.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "5238 Darlene Drive, Toledo, OH 43615",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -901,7 +631,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04539",
@@ -909,7 +639,7 @@
       "case_num": "CI2025-04539",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04539/article_e3025786-72e3-4706-a0e0-51d529df959d.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "3428 Coral Avenue, Toledo, OH 43623",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -919,7 +649,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-03109",
@@ -927,7 +657,7 @@
       "case_num": "CI2025-03109",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-03109/article_3cbfc43f-1da1-4a3d-acb9-502295d212cf.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -937,7 +667,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00122",
@@ -945,7 +675,7 @@
       "case_num": "CI2026-00122",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00122/article_fe0e78f9-85ab-47ef-86a6-cb56a8468b56.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1 Government Center # 600, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -955,7 +685,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-02458",
@@ -963,7 +693,7 @@
       "case_num": "CI2025-02458",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02458/article_4fc50404-ffac-4fd9-922e-afec5759f4d2.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -973,7 +703,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-02230",
@@ -981,7 +711,7 @@
       "case_num": "CI2025-02230",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02230/article_64125a3e-ba07-484f-bb25-f1a91d1e6f32.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "218 West Poinsetta Avenue, Toledo, OH 43612",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -991,7 +721,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2026-00116",
@@ -999,7 +729,7 @@
       "case_num": "CI2026-00116",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2026-00116/article_1e055310-d27b-487a-a320-6534c7042494.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1123 Radcliffe Drive, Toledo, OH 43609",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1009,7 +739,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-03384",
@@ -1017,7 +747,7 @@
       "case_num": "CI2025-03384",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-03384/article_c3499461-057d-4774-82b0-e66e68ef4b8a.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1027,7 +757,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No CI2025-04348",
@@ -1035,7 +765,7 @@
       "case_num": "CI2025-04348",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04348/article_47f97cce-14e7-4e5b-a8cc-db94313a892f.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "525 Heathshire Dr., Toledo, OH 43607",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1045,7 +775,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04366",
@@ -1053,7 +783,7 @@
       "case_num": "CI2025-04366",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04366/article_45219ace-9946-4ae0-8b86-edc9a21ce63f.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "4356 Packard Road, Toledo, OH 43612",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1063,7 +793,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04643",
@@ -1071,7 +801,7 @@
       "case_num": "CI2025-04643",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04643/article_615b32d0-b1da-4f5b-91b7-051ac3f34b07.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1137 Hugo St., Maumee, OH 43537",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1081,7 +811,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04718",
@@ -1089,7 +819,7 @@
       "case_num": "CI2025-04718",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04718/article_e857c71f-b586-497c-9bce-0066cc18185f.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams St., Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1099,7 +829,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04751",
@@ -1107,7 +837,7 @@
       "case_num": "CI2025-04751",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04751/article_606f23d2-088c-429f-8dd6-b6ef01ede0f5.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "4558 290th St., Toledo, OH 43611",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1117,7 +847,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -1125,7 +855,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_d3cbdc90-e476-4d47-b909-0946cf8d3750.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1118 Joel, Toledo, OH 43610",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1135,7 +865,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -1143,7 +873,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_461e3ca8-752f-4570-9af6-aea3b9a39d13.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "715 S. Holland Sylvania Rd., Toledo, OH 43615",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1153,7 +883,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -1233,7 +963,7 @@
       "case_num": "CI2025-02669",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02669/article_288d358c-3671-4fb0-bc84-0d762a7da071.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "1042 McDonald St, Toledo, OH 43612",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1243,7 +973,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-01481",
@@ -1251,7 +981,7 @@
       "case_num": "CI2025-01481",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-01481/article_43279b59-4d0a-4a81-86ca-bee850c59ef9.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "430 San Jose Drive, Toledo, OH 43615, Juwan Chambers And Jane Doe, Real Name Unknown, The Unknown Spouse, If any, of Juwan Chambers, whose last known address is 430 San Jose Drive, Toledo, OH 43615",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1261,7 +991,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-02874",
@@ -1269,7 +999,7 @@
       "case_num": "CI2025-02874",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-02874/article_23975e85-69c6-4cba-8c83-4d571d8c69ff.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "938 Ambia St, Toledo, OH 43610",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1279,7 +1009,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI 2026 00111",
@@ -1305,7 +1035,7 @@
       "case_num": "CI2025-04311",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04311/article_d8f3fcba-9bd6-4256-be23-9cf8988af5ac.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1315,7 +1045,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04769",
@@ -1323,7 +1053,7 @@
       "case_num": "CI2025-04769",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04769/article_81f072a5-dcec-4b87-8517-9b341c64274d.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "700 Adams Street, Toledo, OH 43604",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1333,7 +1063,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Tax Foreclosure Notices",
@@ -1341,7 +1071,7 @@
       "case_num": "UNKNOWN",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/tax-foreclosure-notices/article_b9f06f50-acf8-4720-955c-d2084591aace.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "323 E. Broadway St, Toledo, OH 43605",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1351,7 +1081,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-04046",
@@ -1359,7 +1089,7 @@
       "case_num": "CI2025-04046",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-04046/article_65eb069c-9931-46ba-aa22-f4b70c052c6d.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "4126 Mayfield Drive, Toledo, OH 43612, Unknown Spouse of Crystal Morales, whose last known address is 309 Western Avenue, Toledo, OH 43609 and Unknown Spouse of Crystal Morales, whose last known address is 4126 Mayfield Drive, Toledo, OH 43612",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1369,7 +1099,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     },
     {
       "owner": "Case No. CI2025-03678",
@@ -1377,7 +1107,7 @@
       "case_num": "CI2025-03678",
       "clerk_url": "https://www.toledolegalnews.com/legal_notices/foreclosures/case-no-ci2025-03678/article_99261570-4fc5-4326-bee5-46a7f3194b90.html",
       "filed": "2026-04-13",
-      "prop_address": "Pending Lookup",
+      "prop_address": "556 Thad St, Toledo, OH 43609",
       "prop_city": "Toledo",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1387,7 +1117,7 @@
       "flags": [
         "Pre-foreclosure"
       ],
-      "score": 90
+      "score": 100
     }
   ]
 }
