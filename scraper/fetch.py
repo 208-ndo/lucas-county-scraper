@@ -23,7 +23,6 @@ CONFIG = {
     "NOISE_FILTER": ["annual reports", "dissolutions", "divorce", "zoning", "name changes", "bid notices", "public hearings", "whatsapp"]
 }
 
-# High-precision regex for Ohio addresses
 ADDRESS_PATTERN = r'\d+\s+[A-Za-z0-9\s\.,#-]+,\s+(?:Toledo|Maumee|Perrysburg),\s+OH\s+\d{5}'
 CASE_NUM_PATTERN = r'(CI\d{4}-\d{4,5}|CI\d{4}\d{5})'
 # =================================================
@@ -33,7 +32,8 @@ class DataEnricher:
     async def deep_dive_address(page, url):
         """Visits the actual notice page to find the hidden address."""
         try:
-            await page.goto(url, timeout=15000)
+            # Use wait_until="domcontentloaded" for speed and stability
+            await page.goto(url, timeout=20000, wait_until="domcontentloaded")
             content = await page.content()
             match = re.search(ADDRESS_PATTERN, content)
             return match.group(0) if match else None
@@ -56,7 +56,6 @@ class DataEnricher:
         try:
             response = requests.get(url, headers=headers, params=querystring, timeout=5)
             data = response.json()
-            # Try different common Zillow API keys for value
             val = data.get("zestimate") or data.get("price") or data.get("valuation")
             return float(val) if val else 0.0
         except:
@@ -69,34 +68,43 @@ class LeadCollector:
     def calculate_score(self, lead):
         score = CONFIG["WEIGHTS"].get(lead["doc_type"], 10)
         if lead["prop_address"] and "Pending" not in lead["prop_address"]:
-            score += 30 # Massive boost for verified address
+            score += 30 
         if "REAL ESTATE" not in lead["owner"].upper() and "LLC" not in lead["owner"].upper():
-            score += 20 # Boost for individuals
+            score += 20 
         return min(score, 100)
 
     async def scrape_legal_notices(self, page):
-        print("🔎 Scraping Legal Notices & Deep Diving Addresses...")
-        await page.goto(CONFIG["SOURCES"]["LEGAL_NEWS"])
-        links = await page.query_selector_all("a[href*='/legal_notices/']")
+        print("🔎 Phase 1: Gathering links...")
+        await page.goto(CONFIG["SOURCES"]["LEGAL_NEWS"], wait_until="domcontentloaded")
         
-        for link in links:
-            text = await link.inner_text()
-            # 1. Noise Filter: Skip generic categories
+        # WORKAROUND: Extract all data into a list FIRST to avoid "Execution context destroyed" error
+        links_data = []
+        elements = await page.query_selector_all("a[href*='/legal_notices/']")
+        
+        for el in elements:
+            text = await el.inner_text()
+            url = await el.get_attribute("href")
+            if not url.startswith('http'): url = "https://www.toledolegalnews.com" + url
+            
+            # Apply Noise Filter immediately
             if any(word in text.lower() for word in CONFIG["NOISE_FILTER"]):
                 continue
+                
+            links_data.append({"text": text.strip(), "url": url})
 
-            url = await link.get_attribute("href")
-            if not url.startswith('http'): url = "https://www.toledolegalnews.com" + url
+        print(f"🔎 Phase 2: Deep Diving {len(links_data)} individual leads...")
+        for item in links_data:
+            text = item["text"]
+            url = item["url"]
             
             case_match = re.search(CASE_NUM_PATTERN, url.upper())
             case_num = case_match.group(0) if case_match else "UNKNOWN"
             
-            # 2. The Deep Dive: Visit the page to get the REAL address
             print(f"  diving into: {text[:30]}...")
             actual_address = await DataEnricher.deep_dive_address(page, url)
             
             lead = {
-                "owner": text.strip(),
+                "owner": text,
                 "doc_type": "Foreclosure",
                 "case_num": case_num,
                 "clerk_url": url,
@@ -116,8 +124,7 @@ class LeadCollector:
     async def scrape_sheriff(self, page):
         print("🚔 Scraping Sheriff Sales...")
         try:
-            await page.goto(CONFIG["SOURCES"]["SHERIFF"])
-            await page.wait_for_load_state("networkidle")
+            await page.goto(CONFIG["SOURCES"]["SHERIFF"], wait_until="networkidle")
             content = await page.content()
             addresses = re.findall(ADDRESS_PATTERN, content)
             for addr in set(addresses):
@@ -163,7 +170,7 @@ class LeadCollector:
         os.makedirs("data", exist_ok=True)
         with open("data/records.json", "w") as f:
             json.dump(output, f, indent=2)
-        print(f"🎉 SUCCESS: {len(self.leads)} real leads enriched and pushed.")
+        print(f"🎉 SUCCESS: {len(self.leads)} leads processed.")
 
 if __name__ == "__main__":
     collector = LeadCollector()
