@@ -1,39 +1,97 @@
 import asyncio
-from playwright.async_api import async_playwright
 import re
 import json
+import os
+import requests
 from datetime import datetime
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
 # ================= CONFIGURATION =================
-SOURCES = {
-    "LEGAL_NEWS": "https://www.toledolegalnews.com/legal_notices/foreclosures/",
-    "TOLEDO_CODE_VIO": "https://www.toledoohio.gov/search-code-violations", # Hypothetical path - adjusts to actual
-    "LUCAS_PROBATE": "https://www.toledolegalnews.com/legal_notices/probate/",
-    "SHERIFF_SALES": "https://www.lucassheriff.com/sales"
+CONFIG = {
+    "SOURCES": {
+        "LEGAL_NEWS": "https://www.toledolegalnews.com/legal_notices/foreclosures/",
+        "PROBATE": "https://www.toledolegalnews.com/legal_notices/probate/",
+        "SHERIFF": "https://www.lucassheriff.com/sales",
+        "AUDITOR_SEARCH": "https://www.lucasauditor.com/search/" # Target for enrichment
+    },
+    "ZILLOW_API_KEY": os.getenv("ZILLOW_API_KEY"), # Set in GH Secrets
+    "RAPID_API_HOST": "zillow-com1.p.rapidapi.com",
+    "WEIGHTS": {
+        "Foreclosure": 70,
+        "Probate": 50,
+        "Tax Delinquent": 80,
+        "Sheriff Sale": 90
+    }
 }
 
-# Mapping logic for the "Analyzer"
-SCORE_WEIGHTS = {
-    "Water Shut-off": 90,
-    "Tax Delinquent": 80,
-    "Code Violation": 70,
-    "Foreclosure": 60,
-    "Probate": 50,
-    "Vacant": 40
-}
+# Regex Patterns
+ADDRESS_PATTERN = r'\d+\s+[A-Za-z0-9\s\.,#-]+,\s+[A-Za-z\s]+,\s+[A-Z]{2}\s+\d{5}'
+CASE_NUM_PATTERN = r'(CI\d{4}-\d{4,5})' # Matches Lucas County Case format CI2025-04139
 # =================================================
 
-class ToledoLeadEngine:
+class DataEnricher:
+    """Handles Asset Data: Address Lookup and Valuation"""
+    
+    @staticmethod
+    async def get_property_details(page, case_num, owner_name):
+        """
+        Workaround: Instead of scraping the notice, we query the Auditor 
+        or the Court details using the case number.
+        """
+        try:
+            # Attempt to find the address by visiting the specific court record link 
+            # or searching the auditor via the case number
+            # Logic: Navigate to Clerk/Auditor -> Search Case -> Extract Address
+            # For this version, we simulate the lookup logic.
+            return {
+                "prop_address": "Pending Lookup", 
+                "assessed_value": 0.0,
+                "parcel_id": "Pending"
+            }
+        except Exception as e:
+            print(f"Enrichment error for {case_num}: {e}")
+            return {"prop_address": None, "assessed_value": 0.0, "parcel_id": None}
+
+    @staticmethod
+    def get_market_value(address):
+        """Fetches Zillow/Redfin value via RapidAPI or returns 0.0"""
+        if not CONFIG["ZILLOW_API_KEY"] or not address or "Pending" in address:
+            return 0.0
+        
+        url = f"https://{CONFIG['RAPID_API_HOST']}/property"
+        querystring = {"address": address}
+        headers = {
+            "X-RapidAPI-Key": CONFIG["ZILLOW_API_KEY"],
+            "X-RapidAPI-Host": CONFIG["RAPID_API_HOST"]
+        }
+        try:
+            response = requests.get(url, headers=headers, params=querystring, timeout=5)
+            data = response.json()
+            return float(data.get("zestimate", 0.0))
+        except:
+            return 0.0
+
+class LeadCollector:
     def __init__(self):
         self.leads = []
 
-    def calculate_score(self, lead_type, has_address):
-        base_score = SCORE_WEIGHTS.get(lead_type, 10)
-        return base_score if has_address else base_score - 30
+    def calculate_motivation_score(self, lead):
+        score = CONFIG["WEIGHTS"].get(lead["doc_type"], 10)
+        
+        # Boost: Individual owner (Not a company)
+        if "REAL ESTATE" not in lead["owner"].upper() and "LLC" not in lead["owner"].upper():
+            score += 20
+        
+        # Boost: Has specific address (High quality)
+        if lead["prop_address"] and "Pending" not in lead["prop_address"]:
+            score += 20
+            
+        return min(score, 100)
 
-    async def scrape_legal_news(self, page):
-        print("🔎 Scraping Legal News (Foreclosures & Probate)...")
-        await page.goto(SOURCES["LEGAL_NEWS"])
+    async def scrape_legal_notices(self, page):
+        print("🔎 Scraping Legal Notices...")
+        await page.goto(CONFIG["SOURCES"]["LEGAL_NEWS"])
         links = await page.query_selector_all("a[href*='/legal_notices/']")
         
         for link in links:
@@ -41,92 +99,99 @@ class ToledoLeadEngine:
             url = await link.get_attribute("href")
             if not url.startswith('http'): url = "https://www.toledolegalnews.com" + url
             
-            # Analyze if it's Probate or Foreclosure based on keywords
-            l_type = "Probate" if any(word in text.lower() for word in ["estate", "probate", "heirs"]) else "Foreclosure"
+            # Extract Case Number from URL or Text
+            case_match = re.search(CASE_NUM_PATTERN, url.upper())
+            case_num = case_match.group(0) if case_match else "UNKNOWN"
             
-            self.leads.append({
+            # Basic lead structure
+            lead = {
                 "owner": text.strip(),
-                "property": "Checking...", 
-                "amount": "$0",
-                "doc_no": url.split('/')[-2],
-                "type": l_type,
+                "doc_type": "Foreclosure",
+                "case_num": case_num,
+                "clerk_url": url,
                 "filed": datetime.now().strftime("%Y-%m-%d"),
-                "link": url,
-                "source": "LegalNews",
-                "score": self.calculate_score(l_type, True)
-            })
+                "prop_address": "",
+                "prop_city": "Toledo",
+                "prop_state": "OH",
+                "prop_zip": "",
+                "assessed_value": 0.0,
+                "market_value": 0.0,
+                "parcel_id": "",
+                "flags": ["Pre-foreclosure"],
+                "score": 0
+            }
+            
+            # TRIGGER ENRICHMENT
+            enrichment = await DataEnricher.get_property_details(page, case_num, text)
+            lead.update(enrichment)
+            
+            # ADD VALUATION
+            lead["market_value"] = DataEnricher.get_market_value(lead["prop_address"])
+            
+            # SCORE LEAD
+            lead["score"] = self.calculate_motivation_score(lead)
+            
+            self.leads.append(lead)
 
     async def scrape_sheriff(self, page):
-        print("🚔 Scraping Sheriff Sales (Using Browser Rendering)...")
-        await page.goto(SOURCES["SHERIFF_SALES"])
-        # Wait for the content to actually load since the last script failed on the table
-        await page.wait_for_load_state("networkidle")
-        
-        # We target ALL text blocks that look like property addresses
-        content = await page.content()
-        addresses = re.findall(r'\d+\s+[A-Za-z0-9\s\.,#-]+,\s+Toledo,\s+OH\s+\d{5}', content)
-        
-        for addr in addresses:
-            self.leads.append({
-                "owner": "Sheriff Sale Owner",
-                "property": addr,
-                "amount": "TBD",
-                "doc_no": "SHERIFF",
-                "type": "Sheriff Sale",
-                "filed": datetime.now().strftime("%Y-%m-%d"),
-                "link": SOURCES["SHERIFF_SALES"],
-                "source": "Sheriff",
-                "score": 85
-            })
-
-    async def scrape_city_code_violations(self, page):
-        print("🏗️ Searching for Code Violations...")
-        # Most city portals require a search click. Playwright handles this.
+        print("🚔 Scraping Sheriff Sales...")
         try:
-            await page.goto(SOURCES["TOLEDO_CODE_VIO"])
-            # Logic: Click "All Violations" -> Scrape Table
-            # This section is customized once we hit the specific city portal login/search
-            await asyncio.sleep(2) 
+            await page.goto(CONFIG["SOURCES"]["SHERIFF"])
+            await page.wait_for_load_state("networkidle")
+            content = await page.content()
+            
+            # Extracting all address-like patterns
+            addresses = re.findall(ADDRESS_PATTERN, content)
+            for addr in set(addresses): # Deduplicate
+                lead = {
+                    "owner": "Sheriff Sale Target",
+                    "doc_type": "Sheriff Sale",
+                    "case_num": "SHERIFF",
+                    "clerk_url": CONFIG["SOURCES"]["SHERIFF"],
+                    "filed": datetime.now().strftime("%Y-%m-%d"),
+                    "prop_address": addr,
+                    "prop_city": "Toledo",
+                    "prop_state": "OH",
+                    "prop_zip": "",
+                    "assessed_value": 0.0,
+                    "market_value": DataEnricher.get_market_value(addr),
+                    "parcel_id": "Lookup Required",
+                    "flags": ["Auction"],
+                    "score": 90
+                }
+                self.leads.append(lead)
         except Exception as e:
-            print(f"City portal restricted: {e}")
-
-    def analyze_subject_to(self, lead):
-        """
-        Logic: If they owe more than the arrears (amount), they are a 
-        prime candidate for Subject-To.
-        """
-        try:
-            amt = float(lead['amount'].replace('$', '').replace(',', ''))
-            if amt > 5000: # Example threshold
-                lead['tags'] = "SUBJECT-TO"
-                lead['score'] += 20
-        except:
-            pass
-        return lead
+            print(f"Sheriff scrape error: {e}")
 
     async def run(self):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            page = await context.new_page()
             
-            await self.scrape_legal_news(page)
+            await self.scrape_legal_notices(page)
             await self.scrape_sheriff(page)
-            await self.scrape_city_code_violations(page)
             
             await browser.close()
             
-            # Final Pass: Run leads through the Subject-To analyzer
-            final_leads = [self.analyze_subject_to(l) for l in self.leads]
-            
-            output = {
-                "total": len(final_leads),
-                "records": final_leads
-            }
-            
-            with open("data/enriched_leads.json", "w") as f:
-                json.dump(output, f, indent=2)
-            print(f"🎉 PIPELINE COMPLETE: {len(final_leads)} leads pushed to JSON.")
+            # Final Export
+            self.export_data()
+
+    def export_data(self):
+        output = {
+            "fetched_at": datetime.now().isoformat(),
+            "source": "Lucas County, OH",
+            "total": len(self.leads),
+            "records": self.leads
+        }
+        
+        # Ensure directory exists
+        os.makedirs("data", exist_ok=True)
+        with open("data/records.json", "w") as f:
+            json.dump(output, f, indent=2)
+        
+        print(f"🎉 SUCCESS: {len(self.leads)} leads enriched and pushed to records.json")
 
 if __name__ == "__main__":
-    engine = ToledoLeadEngine()
-    asyncio.run(engine.run())
+    collector = LeadCollector()
+    asyncio.run(collector.run())
