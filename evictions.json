@@ -1,5 +1,8 @@
 {
+  "fetched_at": "2026-04-13T23:09:27.842971+00:00",
+  "source": "Toledo / Lucas County, Ohio",
+  "category": "evictions",
+  "description": "Eviction filings",
   "total": 0,
-  "records": [],
-  "fetched_at": "2026-04-12T19:56:13.028384+00:00"
+  "records": []
 }
