@@ -6,7 +6,21 @@
 <title>Toledo Data</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#0a0a0f;--surface:#12121a;--surface2:#1a1a26;--border:#2a2a3a;--accent:#f5a623;--accent2:#e85d4a;--accent3:#4af5a6;--accent4:#5d8ef5;--text:#e8e8f0;--muted:#6b6b8a;--hot:#ff4444;--warm:#ff8c00;--cool:#44aaff;}
+  :root{
+    --bg:#0a0a0f;
+    --surface:#12121a;
+    --surface2:#1a1a26;
+    --border:#2a2a3a;
+    --accent:#f5a623;
+    --accent2:#e85d4a;
+    --accent3:#4af5a6;
+    --accent4:#5d8ef5;
+    --text:#e8e8f0;
+    --muted:#6b6b8a;
+    --hot:#ff4444;
+    --warm:#ff8c00;
+    --cool:#44aaff;
+  }
   *{margin:0;padding:0;box-sizing:border-box;}
   body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;overflow-x:hidden;}
   .topbar{position:sticky;top:0;z-index:100;background:rgba(10,10,15,0.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:56px;}
@@ -21,7 +35,11 @@
   .stat{display:flex;flex-direction:column;align-items:center;min-width:72px;}
   .stat-num{font-size:20px;font-weight:800;line-height:1;}
   .stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:3px;white-space:nowrap;}
-  .stat-num.hot{color:var(--hot);}.stat-num.warm{color:var(--warm);}.stat-num.cool{color:var(--cool);}.stat-num.green{color:var(--accent3);}.stat-num.gold{color:var(--accent);}
+  .stat-num.hot{color:var(--hot);}
+  .stat-num.warm{color:var(--warm);}
+  .stat-num.cool{color:var(--cool);}
+  .stat-num.green{color:var(--accent3);}
+  .stat-num.gold{color:var(--accent);}
   .sdiv{width:1px;background:var(--border);align-self:stretch;margin:0 2px;}
   .tabs-wrap{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
   .tabs-wrap::-webkit-scrollbar{height:3px;}
@@ -77,8 +95,10 @@
   .view-btn:hover{border-color:var(--accent);color:var(--accent);}
   .eq-bar{width:72px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
   .eq-fill{height:100%;border-radius:2px;}
-  .eq-pos{background:var(--accent3);}.eq-neg{background:var(--accent2);}
+  .eq-pos{background:var(--accent3);}
+  .eq-neg{background:var(--accent2);}
   .eq-lbl{font-family:'Space Mono',monospace;font-size:10px;margin-top:2px;}
+  .val-cell{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent3);}
   .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:var(--muted);gap:8px;}
   .empty-icon{font-size:28px;opacity:.3;}
   .loading{text-align:center;padding:36px;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px;}
@@ -86,7 +106,7 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   .mo{position:fixed;inset:0;background:rgba(0,0,0,.87);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
   .mo.open{display:flex;}
-  .mc{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:780px;max-height:92vh;overflow-y:auto;padding:26px;}
+  .mc{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:860px;max-height:92vh;overflow-y:auto;padding:26px;}
   .mh{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;}
   .mt{font-size:17px;font-weight:800;}
   .ms{font-size:11px;color:var(--muted);font-family:'Space Mono',monospace;margin-top:3px;}
@@ -96,7 +116,7 @@
   .mf{display:flex;flex-direction:column;gap:3px;}
   .mf.full{grid-column:1/-1;}
   .ml{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
-  .mv{font-size:13px;color:var(--text);font-family:'Space Mono',monospace;}
+  .mv{font-size:13px;color:var(--text);font-family:'Space Mono',monospace;word-break:break-word;}
   .mv.hi{color:var(--accent);font-weight:700;}
   .mv.gr{color:var(--accent3);}
   .mv.rd{color:var(--accent2);}
@@ -105,8 +125,6 @@
   .mtags{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px;}
   .mact{grid-column:1/-1;display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
   .sheriff-warn{background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.3);border-radius:7px;padding:9px 14px;grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--hot);}
-
-  /* ── DEAL ANALYZER ── */
   .da-wrap{grid-column:1/-1;background:var(--surface2);border:1px solid var(--accent);border-radius:10px;padding:18px;margin-top:2px;}
   .da-title{font-size:13px;font-weight:800;color:var(--accent);margin-bottom:14px;}
   .da-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -136,7 +154,6 @@
   .mao-num{font-size:36px;font-weight:800;font-family:'Space Mono',monospace;line-height:1;}
   .mao-bd{font-size:11px;font-family:'Space Mono',monospace;color:var(--muted);margin-top:10px;line-height:1.8;}
   .mao-verdict{font-size:13px;font-weight:700;margin-top:8px;}
-
   ::-webkit-scrollbar{width:5px;height:5px;}
   ::-webkit-scrollbar-track{background:var(--bg);}
   ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
@@ -144,7 +161,8 @@
   @media(max-width:768px){
     .mg,.da-grid{grid-template-columns:1fr;}
     .mf.full,.da-field.full,.da-result{grid-column:1;}
-    .statsbar{gap:14px;}.stat-num{font-size:16px;}
+    .statsbar{gap:14px;}
+    .stat-num{font-size:16px;}
   }
 </style>
 </head>
@@ -172,6 +190,7 @@
   <div class="stat"><div class="stat-num green" id="s-absentee">–</div><div class="stat-label">📭 Absentee</div></div><div class="sdiv"></div>
   <div class="stat"><div class="stat-num green" id="s-inherited">–</div><div class="stat-label">🏛 Inherited</div></div><div class="sdiv"></div>
   <div class="stat"><div class="stat-num cool" id="s-subto">–</div><div class="stat-label">🎯 Sub-To</div></div><div class="sdiv"></div>
+  <div class="stat"><div class="stat-num warm" id="s-prefc">–</div><div class="stat-label">⚠️ Pre-FC</div></div><div class="sdiv"></div>
   <div class="stat"><div class="stat-num green" id="s-vacland">–</div><div class="stat-label">🌿 Vac Land</div></div><div class="sdiv"></div>
   <div class="stat"><div class="stat-num" id="s-new">–</div><div class="stat-label">🆕 This Week</div></div>
   <div class="sdiv"></div>
@@ -187,21 +206,20 @@
     <button class="tab urgent" data-tab="sheriff_sales">⚡ Sheriff Sales <span class="badge" id="b-sheriff_sales">0</span></button>
     <button class="tab" data-tab="hot_stack">🔥 Hot Stack <span class="badge" id="b-hot_stack">0</span></button>
     <button class="tab" data-tab="probate">⚖️ Probate <span class="badge" id="b-probate">0</span></button>
-    <button class="tab" data-tab="code_violations">🏚 Code Violations <span class="badge" id="b-code_violations">0</span></button>
-    <button class="tab" data-tab="vacant_homes">🏠 Vacant Homes <span class="badge" id="b-vacant_homes">0</span></button>
-    <button class="tab" data-tab="tax_delinquent">💰 Tax Delinquent <span class="badge" id="b-tax_delinquent">0</span></button>
+    <button class="tab" data-tab="pre_foreclosure">⚠️ Pre-Foreclosure <span class="badge" id="b-pre_foreclosure">0</span></button>
+    <button class="tab" data-tab="foreclosure">🏦 Foreclosure <span class="badge" id="b-foreclosure">0</span></button>
+    <button class="tab" data-tab="inherited">🏛 Inherited <span class="badge" id="b-inherited">0</span></button>
     <button class="tab" data-tab="absentee">📭 Absentee <span class="badge" id="b-absentee">0</span></button>
     <button class="tab" data-tab="out_of_state">🌎 Out-of-State <span class="badge" id="b-out_of_state">0</span></button>
-    <button class="tab" data-tab="inherited">🏛 Inherited <span class="badge" id="b-inherited">0</span></button>
-    <button class="tab" data-tab="foreclosure">⚠️ Foreclosure <span class="badge" id="b-foreclosure">0</span></button>
+    <button class="tab" data-tab="tax_delinquent">💰 Tax Delinquent <span class="badge" id="b-tax_delinquent">0</span></button>
     <button class="tab" data-tab="subject_to">🎯 Subject-To <span class="badge" id="b-subject_to">0</span></button>
-    <button class="tab" data-tab="prime_subject_to">⭐ Prime Deals <span class="badge" id="b-prime_subject_to">0</span></button>
+    <button class="tab" data-tab="liens">🔗 Liens <span class="badge" id="b-liens">0</span></button>
+    <button class="tab" data-tab="divorces">💔 Divorces <span class="badge" id="b-divorces">0</span></button>
+    <button class="tab" data-tab="code_violations">🏚 Code Violations <span class="badge" id="b-code_violations">0</span></button>
+    <button class="tab" data-tab="vacant_homes">🏠 Vacant Homes <span class="badge" id="b-vacant_homes">0</span></button>
     <button class="tab" data-tab="vacant_land">🌿 Vacant Land <span class="badge" id="b-vacant_land">0</span></button>
     <button class="tab" data-tab="evictions">🚪 Evictions <span class="badge" id="b-evictions">0</span></button>
-    <button class="tab" data-tab="divorces">💔 Divorces <span class="badge" id="b-divorces">0</span></button>
-    <button class="tab" data-tab="liens">🔗 Liens <span class="badge" id="b-liens">0</span></button>
-
-    <button class="tab" data-tab="deal_analyzer" style="color:var(--accent3);border-color:var(--accent3)">🧮 Deal Analyzer</button>
+    <button class="tab" data-tab="deal_analyzer" style="color:var(--accent3);">🧮 Deal Analyzer</button>
   </div>
 </div>
 
@@ -221,18 +239,16 @@
     <option value="">All Flags</option>
     <option value="Hot Stack">🔥 Hot Stack</option>
     <option value="Sheriff sale">⚡ Sheriff Sale</option>
+    <option value="Pre-foreclosure">⚠️ Pre-Foreclosure</option>
     <option value="Absentee owner">📭 Absentee</option>
     <option value="Out-of-state owner">🌎 Out-of-State</option>
-    <option value="Vacant home">🏠 Vacant Home</option>
-    <option value="Vacant land">🌿 Vacant Land</option>
+    <option value="Inherited">🏛 Inherited</option>
     <option value="Tax delinquent">💰 Tax Delinquent</option>
     <option value="Code violation">🏚 Code Violation</option>
-    <option value="Inherited">🏛 Inherited</option>
     <option value="Subject-To">🎯 Subject-To</option>
     <option value="New this week">🆕 New This Week</option>
     <option value="Eviction filed">🚪 Eviction</option>
     <option value="Divorce filing">💔 Divorce</option>
-    <option value="Fire damage">🔥 Fire Damage</option>
   </select>
   <select id="f-addr" onchange="applyFilters()">
     <option value="">Address: All</option>
@@ -247,38 +263,35 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr>
-      <th onclick="sortBy('score',this)">Score</th>
-      <th onclick="sortBy('owner',this)">Owner / Property</th>
-      <th onclick="sortBy('cat_label',this)">Type</th>
-      <th onclick="sortBy('filed',this)">Filed</th>
-      <th onclick="sortBy('amount',this)">Amount</th>
-      <th onclick="sortBy('doc_num',this)">Doc #</th>
-      <th>Tags</th>
-      <th>Equity Est.</th>
-      <th>Link</th>
-    </tr></thead>
+    <thead>
+      <tr>
+        <th onclick="sortBy('score',this)">Score</th>
+        <th onclick="sortBy('owner',this)">Owner / Property</th>
+        <th onclick="sortBy('cat_label',this)">Type</th>
+        <th onclick="sortBy('filed',this)">Filed</th>
+        <th onclick="sortBy('amount',this)">Amount</th>
+        <th onclick="sortBy('doc_num',this)">Doc #</th>
+        <th>Tags</th>
+        <th onclick="sortBy('estimated_value',this)">Est. Value</th>
+        <th>Equity Est.</th>
+        <th>Link</th>
+      </tr>
+    </thead>
     <tbody id="tbody">
-      <tr><td colspan="9"><div class="loading"><span class="spinner"></span>Loading leads...</div></td></tr>
+      <tr><td colspan="10"><div class="loading"><span class="spinner"></span>Loading leads...</div></td></tr>
     </tbody>
   </table>
 </div>
 
-<!-- DEAL ANALYZER FULL PAGE -->
+<!-- Deal Analyzer full page -->
 <div id="deal-analyzer-page" style="display:none;padding:24px;max-width:860px;margin:0 auto;">
   <div style="font-size:22px;font-weight:800;color:var(--accent);margin-bottom:6px;">🧮 Deal Analyzer</div>
   <div style="font-size:12px;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:24px;">Quick MAO calculator — punch in numbers during a call</div>
   <div class="da-grid" style="max-width:860px;">
-    <div class="da-field">
-      <label>ARV — After Repair Value</label>
-      <input type="number" id="pg-arv" placeholder="e.g. 120000" oninput="pgCalc()" style="font-size:18px;padding:12px;">
-    </div>
-    <div class="da-field">
-      <label>Wholesale Fee</label>
-      <input type="number" id="pg-fee" value="10000" oninput="pgCalc()" style="font-size:18px;padding:12px;">
-    </div>
+    <div class="da-field"><label>ARV — After Repair Value</label><input type="number" id="pg-arv" placeholder="e.g. 120000" oninput="pgCalc()" style="font-size:18px;padding:12px;"></div>
+    <div class="da-field"><label>Wholesale Fee</label><input type="number" id="pg-fee" value="10000" oninput="pgCalc()" style="font-size:18px;padding:12px;"></div>
     <div class="da-field full">
-      <label>Offer % of ARV &nbsp;<span style="color:var(--muted);font-weight:400;font-size:10px">adjust per market — 70% is standard</span></label>
+      <label>Offer % of ARV <span style="color:var(--muted);font-weight:400;font-size:10px">70% is standard</span></label>
       <div class="slider-row" style="margin-top:6px;">
         <input type="range" id="pg-pct" min="50" max="85" value="70" oninput="document.getElementById('pg-pctv').textContent=this.value+'%';pgCalc()">
         <div class="slider-val" id="pg-pctv" style="font-size:20px;">70%</div>
@@ -299,27 +312,15 @@
         <tr id="pgr3" onclick="pgSelRow(3)"><td>2,500+</td><td>$40k</td><td>$77.5k</td><td>$105k</td></tr>
       </table>
     </div>
-    <div class="da-field">
-      <label>Rehab $ (editable)</label>
-      <input type="number" id="pg-rehab" value="27500" oninput="pgCalc()" style="font-size:18px;padding:12px;">
-    </div>
-    <div class="da-field">
-      <label>Closing Costs</label>
-      <input type="number" id="pg-closing" value="3000" oninput="pgCalc()" style="font-size:18px;padding:12px;">
-    </div>
-
-    <!-- RESULT -->
+    <div class="da-field"><label>Rehab $ (editable)</label><input type="number" id="pg-rehab" value="27500" oninput="pgCalc()" style="font-size:18px;padding:12px;"></div>
+    <div class="da-field"><label>Closing Costs</label><input type="number" id="pg-closing" value="3000" oninput="pgCalc()" style="font-size:18px;padding:12px;"></div>
     <div class="da-result" id="pg-res" style="margin-top:8px;padding:28px;">
       <div class="mao-lbl">Maximum Allowable Offer (MAO)</div>
       <div class="mao-num" id="pg-mao" style="font-size:52px;">Enter ARV ↑</div>
       <div class="mao-bd" id="pg-bd" style="font-size:13px;margin-top:14px;"></div>
       <div class="mao-verdict" id="pg-vd" style="font-size:16px;margin-top:10px;"></div>
     </div>
-
-    <!-- QUICK RESET -->
-    <div class="da-field full" style="margin-top:4px;">
-      <button class="btn btn-ghost" onclick="pgReset()" style="width:100%">↺ Reset</button>
-    </div>
+    <div class="da-field full" style="margin-top:4px;"><button class="btn btn-ghost" onclick="pgReset()" style="width:100%">↺ Reset</button></div>
   </div>
 </div>
 
@@ -328,34 +329,70 @@
 </div>
 
 <script>
-const TAB_FILES={all:'records.json',sheriff_sales:'sheriff_sales.json',hot_stack:'hot_stack.json',probate:'probate.json',code_violations:'code_violations.json',vacant_homes:'vacant_homes.json',tax_delinquent:'tax_delinquent.json',absentee:'absentee.json',out_of_state:'out_of_state.json',inherited:'inherited.json',foreclosure:'foreclosure.json',subject_to:'subject_to.json',prime_subject_to:'prime_subject_to.json',vacant_land:'vacant_land.json',evictions:'evictions.json',divorces:'divorces.json',liens:'liens.json'};
+const TAB_FILES = {
+  all:'records.json',
+  sheriff_sales:'sheriff_sales.json',
+  hot_stack:'hot_stack.json',
+  probate:'probate.json',
+  pre_foreclosure:'pre_foreclosure.json',
+  foreclosure:'foreclosure.json',
+  inherited:'inherited.json',
+  absentee:'absentee.json',
+  out_of_state:'out_of_state.json',
+  tax_delinquent:'tax_delinquent.json',
+  subject_to:'subject_to.json',
+  liens:'liens.json',
+  divorces:'divorces.json',
+  code_violations:'code_violations.json',
+  vacant_homes:'vacant_homes.json',
+  vacant_land:'vacant_land.json',
+  evictions:'evictions.json',
+};
 
-// Rehab cost table from your chart
-const REHAB=[
+const REHAB = [
   {sqft:'Under 1,500 SF',easy:15000,medium:27500,heavy:45000},
   {sqft:'1,500 – 2,000', easy:20000,medium:37500,heavy:65000},
   {sqft:'2,000 – 2,500', easy:30000,medium:57500,heavy:85000},
   {sqft:'2,500+',        easy:40000,medium:77500,heavy:105000},
 ];
 
-let cache={},curTab='all',curRecs=[],filtered=[],sortCol='score',sortDir=-1,rendered=0;
+let cache={}, curTab='all', curRecs=[], filtered=[];
+let sortCol='score', sortDir=-1, rendered=0;
 const PAGE=200;
-let _selRow=0,_cond='medium';
+let _selRow=0, _cond='medium';
+const PG_REHAB=[
+  {easy:15000,medium:27500,heavy:45000},
+  {easy:20000,medium:37500,heavy:65000},
+  {easy:30000,medium:57500,heavy:85000},
+  {easy:40000,medium:77500,heavy:105000}
+];
+let _pgRow=0, _pgCond='medium';
+
+function safeNum(v,fallback=0){const n=Number(v);return Number.isFinite(n)?n:fallback;}
+function fmtMoney(v){
+  if(v===null||v===undefined||v==='') return '–';
+  const n=Number(v);
+  if(!Number.isFinite(n)) return '–';
+  return '$'+n.toLocaleString('en-US',{maximumFractionDigits:0});
+}
+function escapeHTML(s){
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 
 async function fetchJSON(file){
   for(const p of['../data/'+file,'data/'+file,file]){
-    try{const r=await fetch(p);if(r.ok)return await r.json();}catch(e){}
+    try{const r=await fetch(p,{cache:'no-store'});if(r.ok)return await r.json();}catch(e){}
   }
   return null;
 }
 
 async function loadTab(tab){
-  if(cache[tab])return cache[tab];
+  if(cache[tab]) return cache[tab];
   const j=await fetchJSON(TAB_FILES[tab]);
   const recs=j?(j.records||[]):[];
   cache[tab]=recs;
   const b=document.getElementById('b-'+tab);
-  if(b)b.textContent=recs.length.toLocaleString();
+  if(b) b.textContent=recs.length.toLocaleString();
   return recs;
 }
 
@@ -363,112 +400,220 @@ async function loadStats(){
   const j=await fetchJSON('records.json');
   if(!j){document.getElementById('upd').textContent='Offline';return;}
   const r=j.records||[];
-  document.getElementById('s-total').textContent=(j.total||0).toLocaleString();
-  document.getElementById('s-sheriff').textContent=(j.sheriff_sale_count||0).toLocaleString();
-  document.getElementById('s-hot').textContent=(j.hot_stack_count||0).toLocaleString();
-  document.getElementById('s-probate').textContent=(j.probate_count||0).toLocaleString();
-  document.getElementById('s-code').textContent=(j.code_violation_count||0).toLocaleString();
-  document.getElementById('s-vacant').textContent=(j.vacant_home_count||0).toLocaleString();
-  document.getElementById('s-tax').textContent=(j.tax_delinquent_count||0).toLocaleString();
-  document.getElementById('s-absentee').textContent=(j.absentee_count||0).toLocaleString();
-  document.getElementById('s-inherited').textContent=r.filter(x=>x.is_inherited).length.toLocaleString();
-  document.getElementById('s-subto').textContent=(j.subject_to_count||0).toLocaleString();
-  document.getElementById('s-vacland').textContent=(j.vacant_land_count||r.filter(x=>x.is_vacant_land).length).toLocaleString();
-  document.getElementById('s-new').textContent=r.filter(x=>(x.flags||[]).includes('New this week')).length.toLocaleString();
-  document.getElementById('b-all').textContent=(j.total||0).toLocaleString();
-  cache['all']=r;
-  if(j.fetched_at){const d=new Date(j.fetched_at);document.getElementById('upd').textContent='Updated '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}
-}
 
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',async()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');curTab=t.dataset.tab;
-  document.getElementById('tbody').innerHTML='<tr><td colspan="9"><div class="loading"><span class="spinner"></span>Loading...</div></td></tr>';
-  curRecs=await loadTab(curTab);applyFilters();
-}));
+  document.getElementById('s-total').textContent   = safeNum(j.total).toLocaleString();
+  document.getElementById('s-sheriff').textContent  = safeNum(j.sheriff_sale_count).toLocaleString();
+  document.getElementById('s-hot').textContent      = safeNum(j.hot_stack_count).toLocaleString();
+  document.getElementById('s-probate').textContent  = safeNum(j.probate_count).toLocaleString();
+  document.getElementById('s-code').textContent     = safeNum(j.code_violation_count||0).toLocaleString();
+  document.getElementById('s-vacant').textContent   = safeNum(j.vacant_home_count||0).toLocaleString();
+  document.getElementById('s-tax').textContent      = safeNum(j.tax_delinquent_count).toLocaleString();
+  document.getElementById('s-absentee').textContent = safeNum(j.absentee_count).toLocaleString();
+  document.getElementById('s-inherited').textContent= safeNum(j.inherited_count||r.filter(x=>x.is_inherited).length).toLocaleString();
+  document.getElementById('s-subto').textContent    = safeNum(j.subject_to_count).toLocaleString();
+  document.getElementById('s-prefc').textContent    = safeNum(j.foreclosure_count||r.filter(x=>x.doc_type==='NOFC'||x.doc_type==='LP').length).toLocaleString();
+  document.getElementById('s-vacland').textContent  = safeNum(j.vacant_land_count||r.filter(x=>x.is_vacant_land).length).toLocaleString();
+  document.getElementById('s-new').textContent      = r.filter(x=>(x.flags||[]).includes('New this week')).length.toLocaleString();
+
+  document.getElementById('b-all').textContent=safeNum(j.total).toLocaleString();
+  cache['all']=r;
+
+  if(j.fetched_at){
+    const d=new Date(j.fetched_at);
+    document.getElementById('upd').textContent='Updated '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+}
 
 function applyFilters(){
   const q=document.getElementById('search').value.toLowerCase().trim();
   const minS=parseInt(document.getElementById('f-score').value)||0;
   const fl=document.getElementById('f-flag').value.toLowerCase();
   const ad=document.getElementById('f-addr').value;
+
   filtered=curRecs.filter(r=>{
-    if(minS&&(r.score||0)<minS)return false;
-    if(ad==='with'&&!r.prop_address)return false;
-    if(ad==='without'&&r.prop_address)return false;
-    if(fl&&!(r.flags||[]).join(' ').toLowerCase().includes(fl))return false;
-    if(q){const hay=[r.owner,r.prop_address,r.prop_city,r.doc_num,r.doc_type,r.mail_address,r.decedent_name,r.executor_name,(r.flags||[]).join(' ')].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(minS&&safeNum(r.score)<minS) return false;
+    if(ad==='with'&&!r.prop_address) return false;
+    if(ad==='without'&&r.prop_address) return false;
+    if(fl&&!(r.flags||[]).join(' ').toLowerCase().includes(fl)) return false;
+    if(q){
+      const hay=[r.owner,r.prop_address,r.prop_city,r.doc_num,r.doc_type,r.mail_address,r.decedent_name,r.executor_name,(r.flags||[]).join(' ')].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
     return true;
   });
-  doSort();rendered=0;renderTable();
+
+  doSort();
+  rendered=0;
+  renderTable();
   document.getElementById('rec-count').textContent=filtered.length.toLocaleString()+' records';
 }
 
-function clearFilters(){['search','f-score','f-flag','f-addr'].forEach(id=>document.getElementById(id).value='');applyFilters();}
+function clearFilters(){
+  ['search','f-score','f-flag','f-addr'].forEach(id=>document.getElementById(id).value='');
+  applyFilters();
+}
 
-function sortBy(col,th){sortDir=sortCol===col?-sortDir:-1;sortCol=col;document.querySelectorAll('thead th').forEach(x=>x.classList.remove('sorted'));if(th)th.classList.add('sorted');doSort();rendered=0;renderTable();}
-function doSort(){filtered.sort((a,b)=>{let av=a[sortCol],bv=b[sortCol];if(av==null)av=sortDir<0?-Infinity:Infinity;if(bv==null)bv=sortDir<0?-Infinity:Infinity;if(typeof av==='string')return av.localeCompare(bv)*sortDir;return(av-bv)*sortDir;});}
+function sortBy(col,th){
+  sortDir=sortCol===col?-sortDir:-1;
+  sortCol=col;
+  document.querySelectorAll('thead th').forEach(x=>x.classList.remove('sorted'));
+  if(th) th.classList.add('sorted');
+  doSort();rendered=0;renderTable();
+}
+
+function doSort(){
+  filtered.sort((a,b)=>{
+    let av=a[sortCol],bv=b[sortCol];
+    if(['score','amount','estimated_value','est_equity'].includes(sortCol)){
+      av=safeNum(av,sortDir<0?-Infinity:Infinity);
+      bv=safeNum(bv,sortDir<0?-Infinity:Infinity);
+      return (av-bv)*sortDir;
+    }
+    av=String(av??'');bv=String(bv??'');
+    return av.localeCompare(bv)*sortDir;
+  });
+}
 
 function renderTable(){
   const tbody=document.getElementById('tbody');
-  if(!filtered.length){tbody.innerHTML='<tr><td colspan="9"><div class="empty"><div class="empty-icon">◎</div><div>No leads found</div></div></td></tr>';return;}
+  if(!filtered.length){
+    tbody.innerHTML='<tr><td colspan="10"><div class="empty"><div class="empty-icon">◎</div><div>No leads found</div></div></td></tr>';
+    return;
+  }
   tbody.innerHTML=filtered.slice(0,PAGE).map(rowHTML).join('');
-  if(filtered.length>PAGE){const s=document.createElement('tr');s.id='sentinel';s.innerHTML='<td colspan="9"><div class="loading" style="padding:14px">Scroll for more...</div></td>';tbody.appendChild(s);rendered=PAGE;observe();}
+  if(filtered.length>PAGE){
+    const s=document.createElement('tr');
+    s.id='sentinel';
+    s.innerHTML='<td colspan="10"><div class="loading" style="padding:14px">Scroll for more...</div></td>';
+    tbody.appendChild(s);
+    rendered=PAGE;
+    observe();
+  }
 }
-function observe(){const s=document.getElementById('sentinel');if(!s)return;new IntersectionObserver(e=>{if(e[0].isIntersecting)loadMore();},{root:document.querySelector('.table-wrap'),threshold:.1}).observe(s);}
-function loadMore(){const tbody=document.getElementById('tbody');const s=document.getElementById('sentinel');if(s)s.remove();filtered.slice(rendered,rendered+PAGE).forEach(r=>tbody.insertAdjacentHTML('beforeend',rowHTML(r)));rendered+=PAGE;if(rendered<filtered.length){const s=document.createElement('tr');s.id='sentinel';s.innerHTML='<td colspan="9"><div class="loading" style="padding:14px">Loading more...</div></td>';tbody.appendChild(s);observe();}}
+
+function observe(){
+  const s=document.getElementById('sentinel');
+  if(!s) return;
+  new IntersectionObserver(entries=>{
+    if(entries[0].isIntersecting) loadMore();
+  },{root:document.querySelector('.table-wrap'),threshold:.1}).observe(s);
+}
+
+function loadMore(){
+  const tbody=document.getElementById('tbody');
+  const s=document.getElementById('sentinel');
+  if(s) s.remove();
+  filtered.slice(rendered,rendered+PAGE).forEach(r=>{tbody.insertAdjacentHTML('beforeend',rowHTML(r));});
+  rendered+=PAGE;
+  if(rendered<filtered.length){
+    const next=document.createElement('tr');
+    next.id='sentinel';
+    next.innerHTML='<td colspan="10"><div class="loading" style="padding:14px">Loading more...</div></td>';
+    tbody.appendChild(next);
+    observe();
+  }
+}
 
 function rowHTML(r){
-  const sc=r.score||0,scls=sc>=80?'sh':sc>=60?'sm':'sl';
-  const flags=r.flags||[];
-  const tags=flags.slice(0,5).map(tagHTML).join('')+(flags.length>5?`<span class="tag t-gray">+${flags.length-5}</span>`:'');
-  const eq=r.est_equity,eqH=eq!=null?eqBar(eq):'<span style="color:var(--muted);font-size:11px">–</span>';
-  const amt=r.amount!=null?'$'+Number(r.amount).toLocaleString('en-US',{maximumFractionDigits:0}):'–';
-  const addr=r.prop_address?`<div class="owner-sub">${r.prop_address}${r.prop_city?', '+r.prop_city:''}</div>`:'';
-  const dec=r.decedent_name?`<div class="owner-sub">Estate of ${r.decedent_name}</div>`:'';
-  const sh=r.doc_type==='SHERIFF'&&r.sheriff_sale_date?`<div class="owner-sub" style="color:var(--hot)">⚡ Sale: ${r.sheriff_sale_date}</div>`:'';
-  const lnk=r.clerk_url?`<a class="view-btn" href="${r.clerk_url}" target="_blank" onclick="event.stopPropagation()">View</a>`:'<span style="color:var(--muted);font-size:11px">–</span>';
-  const rj=JSON.stringify(r).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
-  return `<tr onclick="openModal('${rj}')"><td><div class="score-badge ${scls}">${sc}</div></td><td style="min-width:190px"><div class="owner-name">${r.owner||'<span style="color:var(--muted)">Unknown</span>'}</div>${dec}${addr}${sh}</td><td class="date-cell">${r.cat_label||r.doc_type||'–'}</td><td class="date-cell">${r.filed||'–'}</td><td class="amount-cell">${amt}</td><td class="date-cell" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${(r.doc_num||'').slice(0,20)}</td><td style="max-width:340px"><div class="tags">${tags}</div></td><td>${eqH}</td><td>${lnk}</td></tr>`;
+  const sc=safeNum(r.score);
+  const scls=sc>=80?'sh':sc>=60?'sm':'sl';
+  const flags=Array.isArray(r.flags)?r.flags:[];
+  const tags=flags.slice(0,4).map(tagHTML).join('')+(flags.length>4?`<span class="tag t-gray">+${flags.length-4}</span>`:'');
+  const eq=r.est_equity;
+  const eqH=eq!=null?eqBar(eq):'<span style="color:var(--muted);font-size:11px">–</span>';
+  const valH=r.estimated_value?`<div class="val-cell">${fmtMoney(r.estimated_value)}</div><div style="font-size:9px;color:var(--muted);font-family:\'Space Mono\',monospace;">${escapeHTML(r.value_source||'est')}</div>`:'<span style="color:var(--muted);font-size:11px">–</span>';
+  const addr=r.prop_address?`<div class="owner-sub">${escapeHTML(r.prop_address)}${r.prop_city?', '+escapeHTML(r.prop_city):''}</div>`:'';
+  const dec=r.decedent_name?`<div class="owner-sub">Estate of ${escapeHTML(r.decedent_name)}</div>`:'';
+  const sh=r.doc_type==='SHERIFF'&&r.sheriff_sale_date?`<div class="owner-sub" style="color:var(--hot)">⚡ Sale: ${escapeHTML(r.sheriff_sale_date)}</div>`:'';
+  const lnk=r.clerk_url?`<a class="view-btn" href="${escapeHTML(r.clerk_url)}" target="_blank" onclick="event.stopPropagation()">View</a>`:'<span style="color:var(--muted);font-size:11px">–</span>';
+  const encoded=encodeURIComponent(JSON.stringify(r));
+  return `
+    <tr onclick="openModal('${encoded}')">
+      <td><div class="score-badge ${scls}">${sc}</div></td>
+      <td style="min-width:190px">
+        <div class="owner-name">${r.owner?escapeHTML(r.owner):'<span style="color:var(--muted)">Unknown</span>'}</div>
+        ${dec}${addr}${sh}
+      </td>
+      <td class="date-cell">${escapeHTML(r.cat_label||r.doc_type||'–')}</td>
+      <td class="date-cell">${escapeHTML(r.filed||'–')}</td>
+      <td class="amount-cell">${fmtMoney(r.amount)}</td>
+      <td class="date-cell" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${escapeHTML((r.doc_num||'').slice(0,20))}</td>
+      <td style="max-width:300px"><div class="tags">${tags}</div></td>
+      <td>${valH}</td>
+      <td>${eqH}</td>
+      <td>${lnk}</td>
+    </tr>`;
 }
 
-function tagHTML(f){const fl=f.toLowerCase();let c='t-gray';if(fl.includes('hot stack')||fl.includes('sheriff')||fl.includes('foreclos')||fl.includes('⚡'))c='t-hot';else if(fl.includes('tax')||fl.includes('debt')||fl.includes('lien')||fl.includes('judgment'))c='t-warn';else if(fl.includes('absentee')||fl.includes('out-of-state')||fl.includes('inherited')||fl.includes('probate')||fl.includes('executor'))c='t-blue';else if(fl.includes('vacant')||fl.includes('code')||fl.includes('nuisance')||fl.includes('violation'))c='t-purple';else if(fl.includes('new this week'))c='t-green';else if(fl.includes('subject-to')||fl.includes('equity')||fl.includes('prime'))c='t-gold';return `<span class="tag ${c}">${f}</span>`;}
+function tagHTML(f){
+  const fl=String(f).toLowerCase();
+  let c='t-gray';
+  if(fl.includes('hot stack')||fl.includes('sheriff')||fl.includes('foreclos')) c='t-hot';
+  else if(fl.includes('pre-foreclosure')||fl.includes('lis pendens')) c='t-hot';
+  else if(fl.includes('tax')||fl.includes('lien')||fl.includes('judgment')) c='t-warn';
+  else if(fl.includes('absentee')||fl.includes('out-of-state')||fl.includes('inherited')||fl.includes('probate')) c='t-blue';
+  else if(fl.includes('vacant')||fl.includes('code')||fl.includes('violation')) c='t-purple';
+  else if(fl.includes('new this week')) c='t-green';
+  else if(fl.includes('subject-to')||fl.includes('prime')) c='t-gold';
+  return `<span class="tag ${c}">${escapeHTML(f)}</span>`;
+}
 
-function eqBar(eq){const pct=Math.min(Math.abs(eq)/150000*100,100),c=eq>=0?'eq-pos':'eq-neg',lbl=eq>=0?`+$${(eq/1000).toFixed(0)}k`:`-$${(Math.abs(eq)/1000).toFixed(0)}k`,col=eq>=0?'var(--accent3)':'var(--accent2)';return `<div class="eq-bar"><div class="eq-fill ${c}" style="width:${pct}%"></div></div><div class="eq-lbl" style="color:${col}">${lbl}</div>`;}
+function eqBar(eq){
+  const n=Number(eq);
+  if(!Number.isFinite(n)) return '<span style="color:var(--muted);font-size:11px">–</span>';
+  const pct=Math.min(Math.abs(n)/150000*100,100);
+  const c=n>=0?'eq-pos':'eq-neg';
+  const lbl=n>=0?`+$${(n/1000).toFixed(0)}k`:`-$${(Math.abs(n)/1000).toFixed(0)}k`;
+  const col=n>=0?'var(--accent3)':'var(--accent2)';
+  return `<div class="eq-bar"><div class="eq-fill ${c}" style="width:${pct}%"></div></div><div class="eq-lbl" style="color:${col}">${lbl}</div>`;
+}
 
-// ── DEAL ANALYZER ──────────────────────────────────────────────────────────
 function dealAnalyzerHTML(arv){
-  const rows=REHAB.map((row,i)=>`<tr id="dr${i}" onclick="selRow(${i})" class="${i===0?'sel':''}"><td>${row.sqft}</td><td>$${(row.easy/1000).toFixed(0)}k</td><td>$${(row.medium/1000).toFixed(0)}k</td><td>$${(row.heavy/1000).toFixed(0)}k</td></tr>`).join('');
-  return `<div class="da-wrap">
-  <div class="da-title">🧮 Deal Analyzer — MAO Calculator</div>
-  <div class="da-grid">
-    <div class="da-field"><label>ARV (After Repair Value)</label><input type="number" id="da-arv" value="${Math.round(arv||0)}" oninput="calcMAO()"></div>
-    <div class="da-field"><label>Wholesale Fee</label><input type="number" id="da-fee" value="10000" oninput="calcMAO()"></div>
-    <div class="da-field full"><label>Offer % of ARV</label>
-      <div class="slider-row"><input type="range" id="da-pct" min="50" max="85" value="70" oninput="document.getElementById('da-pctv').textContent=this.value+'%';calcMAO()"><div class="slider-val" id="da-pctv">70%</div></div>
-    </div>
-    <div class="da-field full"><label>Condition</label>
-      <div class="cond-btns">
-        <button class="cond-btn" onclick="setCond('easy',this)">🟢 Easy — Carpet &amp; Paint</button>
-        <button class="cond-btn active" onclick="setCond('medium',this)">🟡 Needs Work — Kitchen/Bath</button>
-        <button class="cond-btn" style="border-color:var(--hot);color:var(--hot)" onclick="setCond('heavy',this)">🔴 Shit Box — Total Disaster</button>
+  const rows=REHAB.map((row,i)=>`
+    <tr id="dr${i}" onclick="selRow(${i})" class="${i===0?'sel':''}">
+      <td>${row.sqft}</td><td>$${(row.easy/1000).toFixed(0)}k</td>
+      <td>$${(row.medium/1000).toFixed(0)}k</td><td>$${(row.heavy/1000).toFixed(0)}k</td>
+    </tr>`).join('');
+  return `
+    <div class="da-wrap">
+      <div class="da-title">🧮 Deal Analyzer — MAO Calculator</div>
+      <div class="da-grid">
+        <div class="da-field"><label>ARV (After Repair Value)</label><input type="number" id="da-arv" value="${Math.round(arv||0)}" oninput="calcMAO()"></div>
+        <div class="da-field"><label>Wholesale Fee</label><input type="number" id="da-fee" value="10000" oninput="calcMAO()"></div>
+        <div class="da-field full">
+          <label>Offer % of ARV</label>
+          <div class="slider-row">
+            <input type="range" id="da-pct" min="50" max="85" value="70" oninput="document.getElementById('da-pctv').textContent=this.value+'%';calcMAO()">
+            <div class="slider-val" id="da-pctv">70%</div>
+          </div>
+        </div>
+        <div class="da-field full">
+          <label>Condition</label>
+          <div class="cond-btns">
+            <button class="cond-btn" onclick="setCond('easy',this)">🟢 Easy — Carpet &amp; Paint</button>
+            <button class="cond-btn active" onclick="setCond('medium',this)">🟡 Needs Work — Kitchen/Bath</button>
+            <button class="cond-btn" style="border-color:var(--hot);color:var(--hot)" onclick="setCond('heavy',this)">🔴 Shit Box — Total Disaster</button>
+          </div>
+          <table class="rtable">
+            <tr><th>Sq Ft</th><th>🟢 Easy</th><th>🟡 Needs Work</th><th>🔴 Shit Box</th></tr>
+            ${rows}
+          </table>
+        </div>
+        <div class="da-field"><label>Rehab $ (editable)</label><input type="number" id="da-rehab" value="${REHAB[0].medium}" oninput="calcMAO()"></div>
+        <div class="da-field"><label>Closing Costs</label><input type="number" id="da-closing" value="3000" oninput="calcMAO()"></div>
+        <div class="da-result" id="da-res">
+          <div class="mao-lbl">Maximum Allowable Offer (MAO)</div>
+          <div class="mao-num" id="da-mao">–</div>
+          <div class="mao-bd" id="da-bd"></div>
+          <div class="mao-verdict" id="da-vd"></div>
+        </div>
       </div>
-      <table class="rtable"><tr><th>Sq Ft</th><th>🟢 Easy</th><th>🟡 Needs Work</th><th>🔴 Shit Box</th></tr>${rows}</table>
-    </div>
-    <div class="da-field"><label>Rehab $ (auto-filled, editable)</label><input type="number" id="da-rehab" value="${REHAB[0].medium}" oninput="calcMAO()"></div>
-    <div class="da-field"><label>Closing Costs</label><input type="number" id="da-closing" value="3000" oninput="calcMAO()"></div>
-    <div class="da-result" id="da-res">
-      <div class="mao-lbl">Maximum Allowable Offer (MAO)</div>
-      <div class="mao-num" id="da-mao">–</div>
-      <div class="mao-bd" id="da-bd"></div>
-      <div class="mao-verdict" id="da-vd"></div>
-    </div>
-  </div></div>`;
+    </div>`;
 }
 
-function setCond(cond, btn){
+function setCond(cond,btn){
   _cond=cond;
-  document.querySelectorAll('.cond-btn').forEach(b=>{b.classList.remove('active');b.style.borderColor='';b.style.color='';});
+  document.querySelectorAll('#mc .cond-btn').forEach(b=>{b.classList.remove('active');b.style.borderColor='';b.style.color='';});
   btn.classList.add('active');
   if(cond==='heavy'){btn.style.borderColor='var(--hot)';btn.style.color='var(--hot)';}
   if(_selRow!==null){document.getElementById('da-rehab').value=REHAB[_selRow][cond];calcMAO();}
@@ -499,105 +644,69 @@ function calcMAO(){
   res.className='da-result';
   if(mao>30000){res.classList.add('green');maoEl.style.color='var(--accent3)';vd.textContent='✅ Strong deal — room to move';vd.style.color='var(--accent3)';}
   else if(mao>0){res.classList.add('yellow');maoEl.style.color='var(--accent)';vd.textContent='⚠️ Tight deal — negotiate hard';vd.style.color='var(--accent)';}
-  else{res.classList.add('red');maoEl.style.color='var(--accent2)';vd.textContent='❌ Numbers don\'t work — walk away';vd.style.color='var(--accent2)';}
+  else{res.classList.add('red');maoEl.style.color='var(--accent2)';vd.textContent="❌ Numbers don't work — walk away";vd.style.color='var(--accent2)';}
 }
 
-// ── Modal ──────────────────────────────────────────────────────────────────
-function openModal(rj){
-  let r;try{r=JSON.parse(rj.replace(/&quot;/g,'"'));}catch(e){return;}
-  const flags=r.flags||[],isSh=r.doc_type==='SHERIFF',isPro=r.doc_type==='PRO',isVL=r.doc_type==='VACLAND';
-  const eq=r.est_equity!=null?'$'+Number(r.est_equity).toLocaleString():'–';
-  const eqC=r.est_equity!=null?(r.est_equity>=0?'gr':'rd'):'';
-  const fd=v=>v!=null?'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0}):'–';
-  const shW=isSh?`<div class="sheriff-warn">⚡ SHERIFF SALE: ${r.sheriff_sale_date||'TBD'} — Owner must sell or lose everything</div>`:'';
-  const vlW=isVL?`<div class="sheriff-warn" style="background:rgba(74,245,166,.08);border-color:rgba(74,245,166,.3);color:var(--accent3)">🌿 Vacant infill lot — distressed owner, ready to sell</div>`:'';
-  const proS=isPro?`<hr class="mdiv"><div class="msec">Estate Details</div><div class="mf"><div class="ml">Decedent</div><div class="mv">${r.decedent_name||'–'}</div></div><div class="mf"><div class="ml">Executor</div><div class="mv">${r.executor_name||'–'}</div></div><div class="mf"><div class="ml">Executor State</div><div class="mv ${r.executor_state&&r.executor_state!=='OH'?'rd':''}">${r.executor_state||'OH'}</div></div>`:'';
+function fm(v){return String(v??'').replaceAll('"','""');}
 
-  document.getElementById('mc').innerHTML=`
-    <div class="mh"><div><div class="mt">${r.owner||'Unknown Owner'}</div><div class="ms">${r.cat_label||r.doc_type} · Score ${r.score||0} · Sub-To ${r.subject_to_score||0}</div></div><button class="mx" onclick="closeModal()">✕</button></div>
-    <div class="mg">
-      ${shW}${vlW}
-      <div class="msec">Property</div>
-      <div class="mf full"><div class="ml">Property Address</div><div class="mv hi">${r.prop_address||'–'}${r.prop_city?', '+r.prop_city:''} ${r.prop_zip||''}</div></div>
-      <div class="mf full"><div class="ml">Mailing Address</div><div class="mv">${r.mail_address||'–'}${r.mail_city?', '+r.mail_city:''} ${r.mail_state||''} ${r.mail_zip||''}</div></div>
-      <div class="mf"><div class="ml">Parcel ID</div><div class="mv">${r.parcel_id||'–'}</div></div>
-      <div class="mf"><div class="ml">LUC / Acres</div><div class="mv">${r.luc||'–'} / ${r.acres||'–'}</div></div>
-      <div class="mf"><div class="ml">Lender</div><div class="mv">${r.lender||'–'}</div></div>
-      <div class="mf"><div class="ml">Distress Count</div><div class="mv hi">${r.distress_count||0} sources</div></div>
-      <hr class="mdiv">
-      <div class="msec">Value &amp; Equity</div>
-      <div class="mf"><div class="ml">Assessed Value</div><div class="mv">${fd(r.assessed_value)}</div></div>
-      <div class="mf"><div class="ml">Est. Market Value</div><div class="mv hi">${fd(r.estimated_value)}</div></div>
-      <div class="mf"><div class="ml">Last Sale</div><div class="mv">${fd(r.last_sale_price)} ${r.last_sale_year?'('+r.last_sale_year+')':''}</div></div>
-      <div class="mf"><div class="ml">Est. Mortgage Bal.</div><div class="mv">${fd(r.est_mortgage_balance)}</div></div>
-      <div class="mf"><div class="ml">Est. Equity</div><div class="mv ${eqC}">${eq}</div></div>
-      <div class="mf"><div class="ml">Est. Arrears</div><div class="mv">${fd(r.est_arrears)}</div></div>
-      <div class="mf"><div class="ml">Est. Sub-To Payoff</div><div class="mv hi">${fd(r.est_payoff)}</div></div>
-      ${(r.mortgage_signals||[]).length?`<div class="mf full"><div class="ml">Signals</div><div class="mv">${r.mortgage_signals.join(' · ')}</div></div>`:''}
-      <hr class="mdiv">
-      ${dealAnalyzerHTML(r.estimated_value||r.appraised_value||0)}
-      <hr class="mdiv">
-      <div class="msec">Filing Details</div>
-      <div class="mf"><div class="ml">Type</div><div class="mv">${r.cat_label||r.doc_type}</div></div>
-      <div class="mf"><div class="ml">Date Filed</div><div class="mv">${r.filed||'–'}</div></div>
-      <div class="mf"><div class="ml">Doc Number</div><div class="mv">${r.doc_num||'–'}</div></div>
-      <div class="mf"><div class="ml">Amount</div><div class="mv">${fd(r.amount)}</div></div>
-      ${r.sheriff_sale_date?`<div class="mf"><div class="ml">Sheriff Sale Date</div><div class="mv rd">${r.sheriff_sale_date}</div></div>`:''}
-      ${r.code_violation_case?`<div class="mf"><div class="ml">Code Violation</div><div class="mv">${r.code_violation_case}</div></div>`:''}
-      ${proS}
-      <hr class="mdiv">
-      <div class="msec">Distress Sources</div>
-      <div class="mf full"><div class="ml">Sources</div><div class="mv">${(r.distress_sources||[]).join(' · ')||'–'}</div></div>
-      <div class="mtags">${flags.map(tagHTML).join('')}</div>
-      <div class="mact">
-        ${r.clerk_url?`<a class="btn btn-primary" href="${r.clerk_url}" target="_blank">View Public Record</a>`:''}
-        <button class="btn btn-ghost" onclick="exportRow(event,${JSON.stringify(r).replace(/"/g,'&quot;')})">Export Row</button>
-        <button class="btn btn-ghost" onclick="closeModal()">Close</button>
-      </div>
-    </div>`;
-  document.getElementById('modal').classList.add('open');
-  setTimeout(()=>{_selRow=0;_cond='medium';selRow(0);calcMAO();},60);
-}
-
-function closeModal(){document.getElementById('modal').classList.remove('open');}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
-
-// ── Export ────────────────────────────────────────────────────────────────
 function toBatchDataCSV(rows){
-  const H=['First Name','Last Name','Property Address','Property City','Property State','Property Zip','Mailing Address','Mailing City','Mailing State','Mailing Zip','Lead Type','Document Type','Date Filed','Document Number','Amount Owed','Seller Score','Subject-To Score','Distress Count','Distress Sources','Hot Stack','Vacant Land','Vacant Home','Absentee Owner','Out-of-State Owner','Inherited','Est Market Value','Est Equity','Est Arrears','Est Payoff','Mortgage Signals','Sheriff Sale Date','Lender','Code Violation Case','Decedent Name','Executor Name','Executor State','Parcel ID','LUC Code','Flags','Public Records URL','Phone 1','Phone 1 Type','Phone 2','Phone 2 Type','Phone 3','Phone 3 Type','Email','Skip Trace Source'];
-  const sp=n=>{const p=(n||'').trim().split(/\s+/);return p.length<2?[p[0]||'','']:[p[0],p.slice(1).join(' ')];};
-  const fm=v=>{if(v==null)return'';if(Array.isArray(v))v=v.join('; ');return String(v).replace(/"/g,'""');};
-  const lines=rows.map(r=>{const[fn,ln]=sp(r.owner||'');return[fn,ln,r.prop_address||'',r.prop_city||'',r.prop_state||'OH',r.prop_zip||'',r.mail_address||'',r.mail_city||'',r.mail_state||'',r.mail_zip||'',r.cat_label||'',r.doc_type||'',r.filed||'',r.doc_num||'',r.amount!=null?`$${Number(r.amount).toLocaleString()}`:'',r.score||0,r.subject_to_score||0,r.distress_count||0,(r.distress_sources||[]).join('; '),r.hot_stack?'YES':'',r.is_vacant_land?'YES':'',r.is_vacant_home?'YES':'',r.is_absentee?'YES':'',r.is_out_of_state?'YES':'',r.is_inherited?'YES':'',r.estimated_value?`$${Number(r.estimated_value).toLocaleString()}`:'',r.est_equity!=null?`$${Number(r.est_equity).toLocaleString()}`:'',r.est_arrears?`$${Number(r.est_arrears).toLocaleString()}`:'',r.est_payoff?`$${Number(r.est_payoff).toLocaleString()}`:'', (r.mortgage_signals||[]).join('; '),r.sheriff_sale_date||'',r.lender||'',r.code_violation_case||'',r.decedent_name||'',r.executor_name||'',r.executor_state||'',r.parcel_id||'',r.luc||'',(r.flags||[]).join('; '),r.clerk_url||'',(r.phones||[])[0]||'',(r.phone_types||[])[0]||'',(r.phones||[])[1]||'',(r.phone_types||[])[1]||'',(r.phones||[])[2]||'',(r.phone_types||[])[2]||'',(r.emails||[])[0]||'',r.skip_trace_source||''].map(v=>`"${fm(v)}"`).join(',');});
+  const H=['Owner','Property Address','Property City','Property State','Property Zip',
+    'Mailing Address','Mailing City','Mailing State','Mailing Zip',
+    'Lead Type','Document Type','Date Filed','Document Number','Amount',
+    'Score','Hot Stack','Estimated Value','Value Source','Estimated Equity',
+    'Estimated Arrears','Estimated Payoff','Mortgage Signals','Sheriff Sale Date',
+    'Decedent Name','Executor Name','Parcel ID','LUC','Match Method','Flags','Clerk URL'];
+  const lines=rows.map(r=>[
+    r.owner||'',r.prop_address||'',r.prop_city||'',r.prop_state||'',r.prop_zip||'',
+    r.mail_address||'',r.mail_city||'',r.mail_state||'',r.mail_zip||'',
+    r.cat_label||'',r.doc_type||'',r.filed||'',r.doc_num||'',
+    r.amount!=null?Number(r.amount).toLocaleString():'',
+    r.score||'',r.hot_stack?'YES':'',
+    r.estimated_value?`$${Number(r.estimated_value).toLocaleString()}`:'',
+    r.value_source||'',
+    r.est_equity!=null?`$${Number(r.est_equity).toLocaleString()}`:'',
+    r.est_arrears?`$${Number(r.est_arrears).toLocaleString()}`:'',
+    r.est_payoff?`$${Number(r.est_payoff).toLocaleString()}`:'',
+    (r.mortgage_signals||[]).join('; '),r.sheriff_sale_date||'',
+    r.decedent_name||'',r.executor_name||'',r.parcel_id||'',r.luc||'',
+    r.match_method||'',(r.flags||[]).join('; '),r.clerk_url||''
+  ].map(v=>`"${fm(v)}"`).join(','));
   return[H.map(h=>`"${h}"`).join(','),...lines].join('\n');
 }
-function dl(name,content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'text/csv'}));a.download=name;a.click();}
-function exportCSV(){const rows=filtered.length?filtered:curRecs;dl(`skip_trace_${new Date().toISOString().slice(0,10)}.csv`,toBatchDataCSV(rows));}
-function exportHotStack(){const rows=(filtered.length?filtered:curRecs).filter(r=>r.hot_stack);if(!rows.length){alert('No Hot Stack leads');return;}dl(`hot_stack_${new Date().toISOString().slice(0,10)}.csv`,toBatchDataCSV(rows));}
+
+function dl(name,content){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:'text/csv'}));
+  a.download=name;a.click();
+}
+
+function exportCSV(){
+  const rows=filtered.length?filtered:curRecs;
+  dl(`skip_trace_${new Date().toISOString().slice(0,10)}.csv`,toBatchDataCSV(rows));
+}
+
+function exportHotStack(){
+  const rows=(filtered.length?filtered:curRecs).filter(r=>r.hot_stack);
+  if(!rows.length){alert('No Hot Stack leads');return;}
+  dl(`hot_stack_${new Date().toISOString().slice(0,10)}.csv`,toBatchDataCSV(rows));
+}
+
 function exportRow(e,r){e.stopPropagation();dl(`lead_${r.doc_num||'export'}.csv`,toBatchDataCSV([r]));}
 
-// ── Deal Analyzer toggle ─────────────────────────────────────────────────
 function toggleDA(){
   const page=document.getElementById('deal-analyzer-page');
   const toolbar=document.querySelector('.toolbar');
   const tableWrap=document.querySelector('.table-wrap');
   const isOpen=page.style.display==='block';
   if(isOpen){
-    page.style.display='none';
-    toolbar.style.display='flex';
-    tableWrap.style.display='block';
+    page.style.display='none';toolbar.style.display='flex';tableWrap.style.display='block';
     document.querySelectorAll('.tab').forEach(t=>{if(t.dataset.tab===curTab)t.classList.add('active');});
   } else {
-    page.style.display='block';
-    toolbar.style.display='none';
-    tableWrap.style.display='none';
+    page.style.display='block';toolbar.style.display='none';tableWrap.style.display='none';
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    setTimeout(()=>{document.getElementById('pg-arv').focus();},100);
+    setTimeout(()=>document.getElementById('pg-arv').focus(),100);
   }
 }
-
-// ── Page-level Deal Analyzer ──────────────────────────────────────────────
-const PG_REHAB=[{easy:15000,medium:27500,heavy:45000},{easy:20000,medium:37500,heavy:65000},{easy:30000,medium:57500,heavy:85000},{easy:40000,medium:77500,heavy:105000}];
-let _pgRow=0,_pgCond='medium';
 
 function pgSelRow(i){
   _pgRow=i;
@@ -606,20 +715,27 @@ function pgSelRow(i){
   document.getElementById('pg-rehab').value=PG_REHAB[i][_pgCond];
   pgCalc();
 }
+
 function pgSetCond(cond,btn){
   _pgCond=cond;
-  document.querySelectorAll('.cond-btn').forEach(b=>{b.classList.remove('active');});
+  document.querySelectorAll('#deal-analyzer-page .cond-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('pg-rehab').value=PG_REHAB[_pgRow][cond];
   pgCalc();
 }
+
 function pgCalc(){
   const arv=parseFloat(document.getElementById('pg-arv')?.value)||0;
   const pct=parseFloat(document.getElementById('pg-pct')?.value)||70;
   const rehab=parseFloat(document.getElementById('pg-rehab')?.value)||0;
   const fee=parseFloat(document.getElementById('pg-fee')?.value)||10000;
   const closing=parseFloat(document.getElementById('pg-closing')?.value)||3000;
-  if(!arv){document.getElementById('pg-mao').textContent='Enter ARV ↑';document.getElementById('pg-bd').textContent='';document.getElementById('pg-vd').textContent='';return;}
+  if(!arv){
+    document.getElementById('pg-mao').textContent='Enter ARV ↑';
+    document.getElementById('pg-bd').textContent='';
+    document.getElementById('pg-vd').textContent='';
+    return;
+  }
   const mao=(arv*pct/100)-rehab-fee-closing;
   const fmt=v=>v>=0?'$'+Math.round(v).toLocaleString():'-$'+Math.round(Math.abs(v)).toLocaleString();
   document.getElementById('pg-mao').textContent=fmt(mao);
@@ -632,11 +748,14 @@ function pgCalc(){
   else if(mao>0){res.classList.add('yellow');maoEl.style.color='var(--accent)';vd.textContent='⚠️ Tight deal — negotiate hard';vd.style.color='var(--accent)';}
   else{res.classList.add('red');maoEl.style.color='var(--accent2)';vd.textContent="❌ Numbers don't work — walk away";vd.style.color='var(--accent2)';}
 }
+
 function pgReset(){
   document.getElementById('pg-arv').value='';
   document.getElementById('pg-pct').value=70;
   document.getElementById('pg-pctv').textContent='70%';
   _pgRow=0;_pgCond='medium';
+  document.querySelectorAll('#deal-analyzer-page .cond-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('pgc-medium').classList.add('active');
   pgSelRow(0);
   document.getElementById('pg-mao').textContent='Enter ARV ↑';
   document.getElementById('pg-bd').textContent='';
@@ -645,19 +764,84 @@ function pgReset(){
   document.getElementById('pg-arv').focus();
 }
 
-// Override tab click for deal_analyzer tab
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+function openModal(encoded){
+  let r;
+  try{r=JSON.parse(decodeURIComponent(encoded));}catch(e){return;}
+  const flags=r.flags||[];
+  const isSh=r.doc_type==='SHERIFF';
+  const isPro=r.doc_type==='PRO';
+  const eq=r.est_equity!=null?'$'+Number(r.est_equity).toLocaleString():'–';
+  const eqC=r.est_equity!=null?(r.est_equity>=0?'gr':'rd'):'';
+  const shW=isSh?`<div class="sheriff-warn">⚡ SHERIFF SALE: ${escapeHTML(r.sheriff_sale_date||'TBD')} — Owner must sell or lose everything</div>`:'';
+  const proS=isPro?`
+    <hr class="mdiv">
+    <div class="msec">Estate Details</div>
+    <div class="mf"><div class="ml">Decedent</div><div class="mv">${escapeHTML(r.decedent_name||'–')}</div></div>
+    <div class="mf"><div class="ml">Executor</div><div class="mv">${escapeHTML(r.executor_name||'–')}</div></div>
+  `:'';
+  const valDisplay=r.estimated_value?`${fmtMoney(r.estimated_value)} <span style="color:var(--muted);font-size:10px">${escapeHTML(r.value_source||'')}</span>`:'–';
+
+  const html=`
+    <div class="mh">
+      <div>
+        <div class="mt">${escapeHTML(r.owner||'Unknown Owner')}</div>
+        <div class="ms">${escapeHTML(r.cat_label||r.doc_type||'Lead')}</div>
+      </div>
+      <button class="mx" onclick="closeModal()">✕</button>
+    </div>
+    <div class="mg">
+      ${shW}
+      <div class="mf"><div class="ml">Property Address</div><div class="mv">${escapeHTML([r.prop_address,r.prop_city,r.prop_state,r.prop_zip].filter(Boolean).join(', ')||'–')}</div></div>
+      <div class="mf"><div class="ml">Mailing Address</div><div class="mv">${escapeHTML([r.mail_address,r.mail_city,r.mail_state,r.mail_zip].filter(Boolean).join(', ')||'–')}</div></div>
+      <div class="mf"><div class="ml">Document Type</div><div class="mv">${escapeHTML(r.cat_label||r.doc_type||'–')}</div></div>
+      <div class="mf"><div class="ml">Filed Date</div><div class="mv">${escapeHTML(r.filed||'–')}</div></div>
+      <div class="mf"><div class="ml">Document Number</div><div class="mv">${escapeHTML(r.doc_num||'–')}</div></div>
+      <div class="mf"><div class="ml">Amount</div><div class="mv hi">${fmtMoney(r.amount)}</div></div>
+      <div class="mf"><div class="ml">Est. Home Value</div><div class="mv gr">${valDisplay}</div></div>
+      <div class="mf"><div class="ml">Estimated Equity</div><div class="mv ${eqC}">${eq}</div></div>
+      <div class="mf"><div class="ml">Seller Score</div><div class="mv hi">${safeNum(r.score)}</div></div>
+      <div class="mf"><div class="ml">Match Method</div><div class="mv">${escapeHTML(r.match_method||'–')}</div></div>
+      <div class="mf full"><div class="ml">Grantee / Lender</div><div class="mv">${escapeHTML(r.grantee||r.lender||'–')}</div></div>
+      ${proS}
+      <div class="msec">Flags</div>
+      <div class="mtags">${(flags.length?flags:['No flags']).map(tagHTML).join('')}</div>
+      <div class="mact">
+        ${r.clerk_url?`<a class="view-btn" href="${escapeHTML(r.clerk_url)}" target="_blank">Open Record</a>`:''}
+        <button class="view-btn" onclick='exportCurrentModal(event,${JSON.stringify(JSON.stringify(r))})'>Export This Lead</button>
+        <button class="view-btn" onclick="closeModal()">Close</button>
+      </div>
+      <div class="mf full">${dealAnalyzerHTML(r.estimated_value||0)}</div>
+    </div>`;
+
+  document.getElementById('mc').innerHTML=html;
+  document.getElementById('modal').classList.add('open');
+  if(document.getElementById('da-arv')){_selRow=0;_cond='medium';calcMAO();}
+}
+
+function exportCurrentModal(e,rjson){exportRow(e,JSON.parse(rjson));}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',async()=>{
   const isDeal=t.dataset.tab==='deal_analyzer';
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  if(!isDeal) t.classList.add('active');
   document.getElementById('deal-analyzer-page').style.display=isDeal?'block':'none';
   document.querySelector('.toolbar').style.display=isDeal?'none':'flex';
   document.querySelector('.table-wrap').style.display=isDeal?'none':'block';
-  if(isDeal){setTimeout(()=>{document.getElementById('pg-arv').focus();},100);}
+  if(isDeal){setTimeout(()=>document.getElementById('pg-arv').focus(),100);return;}
+  curTab=t.dataset.tab;
+  document.getElementById('tbody').innerHTML='<tr><td colspan="10"><div class="loading"><span class="spinner"></span>Loading...</div></td></tr>';
+  curRecs=await loadTab(curTab);
+  applyFilters();
 }));
 
 async function init(){
-  await loadStats();curRecs=cache['all']||[];applyFilters();
+  await loadStats();
+  curRecs=cache['all']||[];
+  applyFilters();
   Object.keys(TAB_FILES).forEach(tab=>{if(tab!=='all')loadTab(tab);});
 }
+
 init();
 </script>
 </body>
