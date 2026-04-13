@@ -34,6 +34,7 @@ jobs:
         run: python scraper/fetch.py
         env:
           PYTHONUNBUFFERED: "1"
+          ZILLOW_API_KEY: ${{ secrets.ZILLOW_API_KEY }} # <--- Added the API key handshake here
 
       - name: Commit and push data
         run: |
