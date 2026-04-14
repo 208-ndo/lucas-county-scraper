@@ -1,14 +1,14 @@
 {
-  "fetched_at": "2026-04-13T23:09:27.682471+00:00",
+  "fetched_at": "2026-04-14T02:49:23.454347+00:00",
   "source": "Toledo / Lucas County, Ohio",
   "category": "probate",
-  "description": "Estate / probate filings",
+  "description": "Estate / probate",
   "total": 30,
   "records": [
     {
       "doc_num": "PRO-Mark-Coffey-1",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Mark Coffey",
@@ -73,7 +73,7 @@
     {
       "doc_num": "PRO-Carol-Ann-Riffle-2",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Carol Ann Riffle",
@@ -138,7 +138,7 @@
     {
       "doc_num": "PRO-Sharon-Lee-Carpenter-3",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Sharon Lee Carpenter",
@@ -203,7 +203,7 @@
     {
       "doc_num": "PRO-Duane-Bishop-Marshall-4",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Duane Bishop Marshall",
@@ -268,7 +268,7 @@
     {
       "doc_num": "PRO-Leonard-Francis-Topolski-5",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Leonard Francis Topolski",
@@ -333,7 +333,7 @@
     {
       "doc_num": "PRO-Yvonne-Vivian-Nachtrab-6",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Yvonne Vivian Nachtrab",
@@ -398,7 +398,7 @@
     {
       "doc_num": "PRO-Ronald-Keith-Walker-7",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Ronald Keith Walker",
@@ -463,7 +463,7 @@
     {
       "doc_num": "PRO-George-Kanellis-8",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "George Kanellis",
@@ -528,7 +528,7 @@
     {
       "doc_num": "PRO-Catherine-Balwinski-9",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Catherine Balwinski",
@@ -593,7 +593,7 @@
     {
       "doc_num": "PRO-Michael-Anthony-Briones-10",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Michael Anthony Briones",
@@ -658,7 +658,7 @@
     {
       "doc_num": "PRO-Karen-Ann-Leopold-11",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Karen Ann Leopold",
@@ -723,7 +723,7 @@
     {
       "doc_num": "PRO-Jeanne-Yvonne-Scott-12",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Jeanne Yvonne Scott",
@@ -788,7 +788,7 @@
     {
       "doc_num": "PRO-Laurie-Ann-Greene-13",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Laurie Ann Greene",
@@ -853,7 +853,7 @@
     {
       "doc_num": "PRO-Ronald-Ollice-El-14",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Ronald Ollice El",
@@ -918,7 +918,7 @@
     {
       "doc_num": "PRO-David-Drew-Parramore-15",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "David Drew Parramore",
@@ -983,7 +983,7 @@
     {
       "doc_num": "PRO-Colleen-Angela-Johnson-16",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Colleen Angela Johnson",
@@ -1048,7 +1048,7 @@
     {
       "doc_num": "PRO-Foon-Man-Lui-17",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Foon Man Lui",
@@ -1113,7 +1113,7 @@
     {
       "doc_num": "PRO-Glen-Lehr-18",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Glen Lehr",
@@ -1178,7 +1178,7 @@
     {
       "doc_num": "PRO-Michael-Bevan-19",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Michael Bevan",
@@ -1243,7 +1243,7 @@
     {
       "doc_num": "PRO-Craig-Hamilton-Falk-20",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Craig Hamilton Falk",
@@ -1308,7 +1308,7 @@
     {
       "doc_num": "PRO-Juda-Klay-Iles-21",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Juda Klay Iles",
@@ -1373,7 +1373,7 @@
     {
       "doc_num": "PRO-Larry-Darnell-Crawford-22",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Larry Darnell Crawford",
@@ -1438,7 +1438,7 @@
     {
       "doc_num": "PRO-Bebi-Multan-Hacklema-Rasheed-23",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Bebi Multan Hacklema Rasheed",
@@ -1503,7 +1503,7 @@
     {
       "doc_num": "PRO-John-Achinger-24",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "John Achinger",
@@ -1568,7 +1568,7 @@
     {
       "doc_num": "PRO-Erleen-June-Maginn-25",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Erleen June Maginn",
@@ -1633,7 +1633,7 @@
     {
       "doc_num": "PRO-Mark-Philip-Murphy-26",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Mark Philip Murphy",
@@ -1698,7 +1698,7 @@
     {
       "doc_num": "PRO-Bernadine-Markja-27",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Bernadine Markja",
@@ -1763,7 +1763,7 @@
     {
       "doc_num": "PRO-Mary-Eileen-Sheets-28",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Mary Eileen Sheets",
@@ -1828,7 +1828,7 @@
     {
       "doc_num": "PRO-Mark-Edward-Francis-Buck-29",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Mark Edward Francis Buck",
@@ -1893,7 +1893,7 @@
     {
       "doc_num": "PRO-Willie-Lee-Jones-30",
       "doc_type": "PRO",
-      "filed": "2026-04-13",
+      "filed": "2026-04-14",
       "cat": "PRO",
       "cat_label": "Probate / Estate",
       "owner": "Willie Lee Jones",
