@@ -57,6 +57,11 @@ jobs:
             echo "No parcel file - using auditor API fallback"
           fi
 
+      - name: Test Redfin API
+        run: python scraper/test_redfin.py
+        env:
+          PYTHONUNBUFFERED: "1"
+
       - name: Run Toledo scraper
         run: |
           if [ -f "data/parcels/ParcelsAddress.dbf" ]; then
