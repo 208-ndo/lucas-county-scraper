@@ -1,7 +1,5 @@
 """
 Toledo / Lucas County — Motivated Seller Intelligence Platform v3
-=================================================================
-Sources, parcel enrichment, Redfin AVM — all free, no auth required.
 """
 import argparse, asyncio, csv, json, logging, os, re, time, random
 from collections import defaultdict
@@ -15,31 +13,31 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-# ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).resolve().parent.parent
 DATA_DIR      = BASE_DIR / "data"
 DASHBOARD_DIR = BASE_DIR / "dashboard"
 DEBUG_DIR     = DATA_DIR / "debug"
 
-DEFAULT_OUTPUT_JSON_PATHS = [DATA_DIR / "records.json", DASHBOARD_DIR / "records.json"]
+DEFAULT_OUTPUT_JSON_PATHS = [DATA_DIR/"records.json", DASHBOARD_DIR/"records.json"]
 DEFAULT_OUTPUT_CSV_PATH   = DATA_DIR / "ghl_export.csv"
 DEFAULT_ENRICHED_CSV_PATH = DATA_DIR / "records.enriched.csv"
 
 DBF_PARCELS_ADDRESS = Path(os.getenv("DBF_PARCELS_ADDRESS",
-                            str(BASE_DIR / "data" / "parcels" / "ParcelsAddress.dbf")))
-CSV_PARCELS_ADDRESS = BASE_DIR / "data" / "parcels" / "ParcelsAddress.csv"
+                            str(BASE_DIR/"data"/"parcels"/"ParcelsAddress.dbf")))
+CSV_PARCELS_ADDRESS = BASE_DIR/"data"/"parcels"/"ParcelsAddress.csv"
 
 LOOKBACK_DAYS = 90
 SOURCE_NAME   = "Toledo / Lucas County, Ohio"
 OH_APPR_RATE  = 0.04
 
-ZILLOW_API_KEY   = os.getenv("ZILLOW_API_KEY", "")
-ZILLOW_API_HOST  = "zillow-com1.p.rapidapi.com"
-ZILLOW_CACHE: Dict[str, Optional[float]] = {}
-ZILLOW_CALLS = 0; ZILLOW_MAX_CALLS = 400
+ZILLOW_API_KEY  = os.getenv("ZILLOW_API_KEY","")
+ZILLOW_API_HOST = "zillow-com1.p.rapidapi.com"
+ZILLOW_CACHE: Dict[str,Optional[float]] = {}
+ZILLOW_CALLS=0; ZILLOW_MAX_CALLS=400
 
-REDFIN_CACHE: Dict[str, Optional[dict]] = {}
-REDFIN_CALLS = 0; REDFIN_MAX_CALLS = 200
+REDFIN_CACHE: Dict[str,Optional[dict]] = {}
+REDFIN_CALLS=0; REDFIN_MAX_CALLS=200
+REDFIN_DEBUG_SAVED=False  # save one response for debugging
 
 TLN_BASE             = "https://www.toledolegalnews.com"
 TLN_COMMON_PLEAS_URL = "https://www.toledolegalnews.com/courts/common_pleas/"
@@ -47,26 +45,20 @@ TLN_FORECLOSURES_URL = "https://www.toledolegalnews.com/legal_notices/foreclosur
 TLN_PROBATE_URL      = "https://www.toledolegalnews.com/courts/probate/"
 TLN_DOMESTIC_URL     = "https://www.toledolegalnews.com/courts/domestic_court/"
 SHERIFF_BASE         = "https://lucas.sheriffsaleauction.ohio.gov"
-LC_TREASURER_URL     = "https://www.lucascountytreasurer.org/delinquent-taxes"
-
-# Lucas County Auditor property search — free, no auth
-LC_AUDITOR_SEARCH = "https://lucascountyauditor.org/property-search"
-LC_AUDITOR_API    = "https://lucascountyauditor.org/api/property"
-
-# Lucas County Common Pleas case search — for sheriff owner lookup
-LC_CPC_CASE  = "http://lcapps.co.lucas.oh.us/CPC/CaseSearch.aspx"
-LC_CPC_CASE2 = "https://ewservices.co.lucas.oh.us/CaseView/"
+LC_AUDITOR_API       = "https://lucascountyauditor.org/api/property"
+LC_CPC_CASE          = "http://lcapps.co.lucas.oh.us/CPC/CaseSearch.aspx"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,*/*",
-    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+    "Accept":"text/html,application/xhtml+xml,*/*",
+    "Accept-Language":"en-US,en;q=0.9",
 }
-
 REDFIN_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json,*/*",
-    "Referer": "https://www.redfin.com/",
+    "User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+    "Accept":"application/json,*/*",
+    "Accept-Language":"en-US,en;q=0.9",
+    "Referer":"https://www.redfin.com/",
+    "Accept-Encoding":"gzip, deflate, br",
 }
 
 LEGAL_BOILERPLATE = {
@@ -94,223 +86,110 @@ STATE_CODES = {
     "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
     "VA","WA","WV","WI","WY","DC"
 }
+STACK_BONUS={2:15,3:25,4:40}
+NOISE_WORDS=["annual reports","dissolutions","zoning","name changes","bid notices",
+             "public hearings","whatsapp","facebook","twitter","sign up","log in",
+             "contact us","terms of use","privacy","e-edition","classifieds"]
+JUNK_ADDR={"increments","bids pl","am et case","property addr","pending","unknown","tbd"}
 
-STACK_BONUS = {2:15, 3:25, 4:40}
-NOISE_WORDS = [
-    "annual reports","dissolutions","zoning","name changes","bid notices",
-    "public hearings","whatsapp","facebook","twitter","sign up","log in",
-    "contact us","terms of use","privacy","e-edition","classifieds",
-]
-JUNK_ADDR = {"increments","bids pl","am et case","property addr","pending","unknown","tbd"}
-
-# ── Data class ─────────────────────────────────────────────────────────────
 @dataclass
 class LeadRecord:
-    doc_num: str = ""
-    doc_type: str = ""
-    filed: str = ""
-    cat: str = ""
-    cat_label: str = ""
-    owner: str = ""
-    grantee: str = ""
-    amount: Optional[float] = None
-    legal: str = ""
-    prop_address: str = ""
-    prop_city: str = ""
-    prop_state: str = "OH"
-    prop_zip: str = ""
-    mail_address: str = ""
-    mail_city: str = ""
-    mail_state: str = ""
-    mail_zip: str = ""
-    clerk_url: str = ""
-    flags: List[str] = field(default_factory=list)
-    score: int = 0
-    match_method: str = "unmatched"
-    match_score: float = 0.0
-    with_address: int = 0
-    distress_sources: List[str] = field(default_factory=list)
-    distress_count: int = 0
-    hot_stack: bool = False
-    parcel_id: str = ""
-    luc: str = ""
-    is_vacant_land: bool = False
-    is_vacant_home: bool = False
-    is_absentee: bool = False
-    is_out_of_state: bool = False
-    is_inherited: bool = False
-    assessed_value: Optional[float] = None
-    estimated_value: Optional[float] = None
-    redfin_value: Optional[float] = None
-    zillow_value: Optional[float] = None
-    value_source: str = ""
-    last_sale_price: Optional[float] = None
-    last_sale_year: Optional[int] = None
-    beds: Optional[int] = None
-    baths: Optional[float] = None
-    sqft: Optional[int] = None
-    est_mortgage_balance: Optional[float] = None
-    est_equity: Optional[float] = None
-    est_arrears: Optional[float] = None
-    est_payoff: Optional[float] = None
-    subject_to_score: int = 0
-    mortgage_signals: List[str] = field(default_factory=list)
-    sheriff_sale_date: str = ""
-    appraised_value: Optional[float] = None
-    lender: str = ""
-    decedent_name: str = ""
-    executor_name: str = ""
+    doc_num:str=""; doc_type:str=""; filed:str=""; cat:str=""; cat_label:str=""
+    owner:str=""; grantee:str=""; amount:Optional[float]=None; legal:str=""
+    prop_address:str=""; prop_city:str=""; prop_state:str="OH"; prop_zip:str=""
+    mail_address:str=""; mail_city:str=""; mail_state:str=""; mail_zip:str=""
+    clerk_url:str=""; flags:List[str]=field(default_factory=list)
+    score:int=0; match_method:str="unmatched"; match_score:float=0.0
+    with_address:int=0; distress_sources:List[str]=field(default_factory=list)
+    distress_count:int=0; hot_stack:bool=False; parcel_id:str=""; luc:str=""
+    is_vacant_land:bool=False; is_vacant_home:bool=False
+    is_absentee:bool=False; is_out_of_state:bool=False; is_inherited:bool=False
+    assessed_value:Optional[float]=None; estimated_value:Optional[float]=None
+    redfin_value:Optional[float]=None; zillow_value:Optional[float]=None
+    value_source:str=""
+    last_sale_price:Optional[float]=None; last_sale_year:Optional[int]=None
+    beds:Optional[int]=None; baths:Optional[float]=None; sqft:Optional[int]=None
+    est_mortgage_balance:Optional[float]=None; est_equity:Optional[float]=None
+    est_arrears:Optional[float]=None; est_payoff:Optional[float]=None
+    subject_to_score:int=0; mortgage_signals:List[str]=field(default_factory=list)
+    sheriff_sale_date:str=""; appraised_value:Optional[float]=None
+    lender:str=""; decedent_name:str=""; executor_name:str=""
 
-# ── Helpers ────────────────────────────────────────────────────────────────
 def ensure_dirs():
-    for d in [DATA_DIR, DASHBOARD_DIR, DEBUG_DIR]:
-        d.mkdir(parents=True, exist_ok=True)
-
+    for d in [DATA_DIR,DASHBOARD_DIR,DEBUG_DIR]: d.mkdir(parents=True,exist_ok=True)
 def log_setup():
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s | %(levelname)s | %(message)s")
-
-def save_debug(name: str, content: str):
-    try: (DEBUG_DIR / name).write_text(content[:50000], encoding="utf-8")
+    logging.basicConfig(level=logging.INFO,format="%(asctime)s | %(levelname)s | %(message)s")
+def save_debug(name,content):
+    try: (DEBUG_DIR/name).write_text(str(content)[:50000],encoding="utf-8")
     except: pass
-
-def clean(v) -> str:
+def clean(v):
     if v is None: return ""
-    return re.sub(r"\s+", " ", str(v)).strip()
-
-def norm_state(v: str) -> str:
-    v = re.sub(r"[^A-Z]", "", clean(v).upper())
-    return v if v in STATE_CODES else ""
-
-def retry_get(url, attempts=3, timeout=20, delay=2.0, hdrs=None, **kw):
-    h = hdrs or HEADERS; last = None
-    for i in range(1, attempts+1):
-        try:
-            r = requests.get(url, headers=h, timeout=timeout, allow_redirects=True, **kw)
-            r.raise_for_status(); return r
-        except Exception as e:
-            last = e
-            if i < attempts: time.sleep(delay * i + random.uniform(0,1))
-    raise last
-
-async def pw_fetch(url: str, wait_ms: int = 2500) -> str:
-    if not url or not url.startswith("http"): return ""
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox","--disable-blink-features=AutomationControlled",
-                      "--disable-dev-shm-usage","--disable-gpu"]
-            )
-            ctx = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-                viewport={"width":1366,"height":768},
-                locale="en-US", timezone_id="America/New_York",
-            )
-            await ctx.add_init_script("""
-                Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-                Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
-                window.chrome={runtime:{}};
-            """)
-            page = await ctx.new_page()
-            try:
-                domain = re.match(r"https?://[^/]+", url)
-                if domain:
-                    try:
-                        await page.goto(domain.group(0), wait_until="domcontentloaded", timeout=15000)
-                        await page.wait_for_timeout(400 + random.randint(0,200))
-                    except: pass
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(wait_ms + random.randint(0,400))
-                html = await page.content()
-                logging.info("pw_fetch %s chars from %s", len(html), url[:80])
-                return html
-            finally:
-                await page.close()
-                await browser.close()
-    except Exception as e:
-        logging.warning("pw_fetch failed %s: %s", url[:80], e)
-        return ""
-
-def parse_amount(v: str) -> Optional[float]:
+    return re.sub(r"\s+"," ",str(v)).strip()
+def norm_state(v):
+    v=re.sub(r"[^A-Z]","",clean(v).upper()); return v if v in STATE_CODES else ""
+def parse_amount(v):
     if not v: return None
-    c = re.sub(r"[^0-9.\-]","",v)
+    c=re.sub(r"[^0-9.\-]","",v)
     try: return float(c) if c else None
     except: return None
-
-def norm_addr_key(address: str) -> str:
-    addr = clean(address).upper()
-    for old, new in [
-        ("NORTH","N"),("SOUTH","S"),("EAST","E"),("WEST","W"),
-        ("N.","N"),("S.","S"),("E.","E"),("W.","W"),
-        ("STREET","ST"),("AVENUE","AVE"),("ROAD","RD"),("DRIVE","DR"),
-        ("BOULEVARD","BLVD"),("LANE","LN"),("COURT","CT"),("PLACE","PL"),
-        ("TERRACE","TER"),("CIRCLE","CIR"),("PARKWAY","PKWY"),
-    ]:
-        addr = re.sub(r'\b'+old+r'\b', new, addr)
+def norm_addr_key(address):
+    addr=clean(address).upper()
+    for old,new in [("NORTH","N"),("SOUTH","S"),("EAST","E"),("WEST","W"),
+                    ("N.","N"),("S.","S"),("E.","E"),("W.","W"),
+                    ("STREET","ST"),("AVENUE","AVE"),("ROAD","RD"),("DRIVE","DR"),
+                    ("BOULEVARD","BLVD"),("LANE","LN"),("COURT","CT"),("PLACE","PL"),
+                    ("TERRACE","TER"),("CIRCLE","CIR"),("PARKWAY","PKWY")]:
+        addr=re.sub(r'\b'+old+r'\b',new,addr)
     return re.sub(r"\s+"," ",re.sub(r"[^A-Z0-9\s]","",addr)).strip()
-
-def norm_name(n: str) -> str:
-    n = clean(n).upper()
+def norm_name(n):
+    n=clean(n).upper()
     return re.sub(r"\s+"," ",re.sub(r"[^A-Z0-9,&.\- /']"," ",n)).strip()
-
-def name_variants(name: str) -> List[str]:
-    n = clean(name).upper()
+def name_variants(name):
+    n=clean(name).upper()
     if not n: return []
-    n = re.sub(r'\b(JR|SR|II|III|IV|ESQ|DEC|DECEASED|ET\s+AL|ETAL)\.?\b','',n).strip()
-    variants: set = {n}
-    parts = [p for p in re.split(r"[\s,]+",n) if p and len(p)>1]
+    n=re.sub(r'\b(JR|SR|II|III|IV|ESQ|DEC|DECEASED|ET\s+AL|ETAL)\.?\b','',n).strip()
+    variants={n}; parts=[p for p in re.split(r"[\s,]+",n) if p and len(p)>1]
     if len(parts)>=2:
-        variants.update([
-            " ".join(parts), f"{parts[-1]} {parts[0]}",
-            f"{parts[0]} {parts[-1]}", f"{parts[-1]}, {parts[0]}",
-            f"{parts[0]}, {parts[-1]}", " ".join(sorted(parts)),
-            parts[0], parts[-1],
-        ])
+        variants.update([" ".join(parts),f"{parts[-1]} {parts[0]}",
+                         f"{parts[0]} {parts[-1]}",f"{parts[-1]}, {parts[0]}",
+                         f"{parts[0]}, {parts[-1]}"," ".join(sorted(parts)),
+                         parts[0],parts[-1]])
     return [v.strip() for v in variants if v.strip()]
-
-def likely_corp(n: str) -> bool:
-    CORP = {"LLC","INC","CORP","CO","TRUST","BANK","LTD","LP","PLC","HOLDINGS",
-            "PROPERTIES","REALTY","INVESTMENTS","CAPITAL","GROUP","PARTNERS"}
+def likely_corp(n):
+    CORP={"LLC","INC","CORP","CO","TRUST","BANK","LTD","LP","PLC","HOLDINGS",
+          "PROPERTIES","REALTY","INVESTMENTS","CAPITAL","GROUP","PARTNERS"}
     return any(t in CORP for t in norm_name(n).split())
-
-def is_boilerplate(name: str) -> bool:
+def is_boilerplate(name):
     if not name or len(name.strip())<3: return True
-    n = clean(name).lower()
+    n=clean(name).lower()
     if any(p in n for p in LEGAL_BOILERPLATE): return True
     if re.fullmatch(r"[\d\s\-\.]+",n): return True
     return False
-
-def try_parse_date(text: str) -> Optional[str]:
-    text = clean(text)
+def try_parse_date(text):
+    text=clean(text)
     if not text: return None
     for pat in [r"\b(\d{4}-\d{2}-\d{2})\b",r"\b(\d{1,2}/\d{1,2}/\d{4})\b",
                 r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
                 r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b"]:
-        m = re.search(pat, text, re.IGNORECASE)
+        m=re.search(pat,text,re.IGNORECASE)
         if m:
-            raw = m.group(0)
+            raw=m.group(0)
             for fmt in ("%Y-%m-%d","%m/%d/%Y","%m/%d/%y","%B %d, %Y","%B %d %Y"):
                 try: return datetime.strptime(raw,fmt).date().isoformat()
                 except: continue
     return None
-
-def is_recent(filed: str, days: int = LOOKBACK_DAYS) -> bool:
-    try: return datetime.fromisoformat(filed).date() >= (datetime.now().date() - timedelta(days=days))
+def is_recent(filed,days=LOOKBACK_DAYS):
+    try: return datetime.fromisoformat(filed).date()>=(datetime.now().date()-timedelta(days=days))
     except: return True
-
-def is_noise(text: str) -> bool:
-    return any(w in text.lower() for w in NOISE_WORDS)
-
-def is_valid_address(addr: str) -> bool:
+def is_noise(text): return any(w in text.lower() for w in NOISE_WORDS)
+def is_valid_address(addr):
     if not addr: return False
-    a = addr.lower()
+    a=addr.lower()
     if any(t in a for t in JUNK_ADDR): return False
-    if not re.match(r"^\d{1,5}\s+[a-zA-Z]", addr.strip()): return False
+    if not re.match(r"^\d{1,5}\s+[a-zA-Z]",addr.strip()): return False
     return True
-
-def infer_doc_type(text: str) -> Optional[str]:
-    t = clean(text).upper()
+def infer_doc_type(text):
+    t=clean(text).upper()
     if any(x in t for x in ["LIS PENDENS"," LP ","LP-"]): return "LP"
     if any(x in t for x in ["FORECLOS","NOFC","COMPLAINT TO FORECLOSE","MTG ON"]): return "NOFC"
     if "SHERIFF" in t: return "SHERIFF"
@@ -326,20 +205,17 @@ def infer_doc_type(text: str) -> Optional[str]:
     if any(x in t for x in ["PROBATE","ESTATE OF"]): return "PRO"
     if "BANKRUPTCY" in t: return "BK"
     return None
-
-def classify_distress(doc_type: str) -> Optional[str]:
-    return {
-        "LP":"lis_pendens","RELLP":"lis_pendens","NOFC":"foreclosure",
-        "TAXDEED":"tax_delinquent","JUD":"judgment","CCJ":"judgment",
-        "LN":"lien","LNHOA":"lien","LNFED":"lien","LNIRS":"lien",
-        "LNCORPTX":"lien","MEDLN":"lien","LNMECH":"mechanic_lien",
-        "NOC":"mechanic_lien","TAX":"tax_delinquent","PRO":"probate",
-        "SHERIFF":"sheriff_sale","CODEVIOLATION":"code_violation",
-        "DIVORCE":"divorce","EVICTION":"eviction","BK":"bankruptcy",
-    }.get(clean(doc_type).upper())
-
-def cat_flags(doc_type: str, owner: str = "") -> List[str]:
-    flags = []; dt = clean(doc_type).upper()
+def classify_distress(doc_type):
+    return {"LP":"lis_pendens","RELLP":"lis_pendens","NOFC":"foreclosure",
+            "TAXDEED":"tax_delinquent","JUD":"judgment","CCJ":"judgment",
+            "LN":"lien","LNHOA":"lien","LNFED":"lien","LNIRS":"lien",
+            "LNCORPTX":"lien","MEDLN":"lien","LNMECH":"mechanic_lien",
+            "NOC":"mechanic_lien","TAX":"tax_delinquent","PRO":"probate",
+            "SHERIFF":"sheriff_sale","CODEVIOLATION":"code_violation",
+            "DIVORCE":"divorce","EVICTION":"eviction","BK":"bankruptcy",
+            }.get(clean(doc_type).upper())
+def cat_flags(doc_type,owner=""):
+    flags=[]; dt=clean(doc_type).upper()
     if dt=="LP": flags.append("Lis pendens")
     if dt=="NOFC": flags.append("Pre-foreclosure")
     if dt in {"JUD","CCJ","DRJUD"}: flags.append("Judgment lien")
@@ -352,213 +228,291 @@ def cat_flags(doc_type: str, owner: str = "") -> List[str]:
     if dt=="BK": flags.append("Bankruptcy")
     if likely_corp(norm_name(owner)): flags.append("LLC / corp owner")
     return list(dict.fromkeys(flags))
-
-def is_absentee(prop: str, mail: str, mail_state: str = "") -> bool:
+def is_absentee(prop,mail,mail_state=""):
     if not prop or not mail: return False
-    if re.search(r"\bP\.?\s*O\.?\s*BOX\b", mail.upper()): return True
-    s = norm_state(mail_state)
-    if s and s != "OH": return True
-    pk = norm_addr_key(prop); mk = norm_addr_key(mail)
+    if re.search(r"\bP\.?\s*O\.?\s*BOX\b",mail.upper()): return True
+    s=norm_state(mail_state)
+    if s and s!="OH": return True
+    pk=norm_addr_key(prop); mk=norm_addr_key(mail)
     if not pk or not mk or pk==mk: return False
-    return " ".join(pk.split()[:2]) != " ".join(mk.split()[:2])
+    return " ".join(pk.split()[:2])!=" ".join(mk.split()[:2])
+def is_oos(mail_state):
+    s=norm_state(mail_state); return bool(s and s!="OH")
 
-def is_oos(mail_state: str) -> bool:
-    s = norm_state(mail_state)
-    return bool(s and s != "OH")
-
-# ── Sheriff case lookup — get owner name from CPC by case number ───────────
-_sheriff_owner_cache: Dict[str, str] = {}
-
-def lookup_sheriff_owner(case_num: str) -> str:
-    """
-    Look up the property owner/defendant for a sheriff sale by case number.
-    Uses Lucas County Common Pleas public case search.
-    Returns owner name or empty string.
-    """
-    if not case_num or case_num in _sheriff_owner_cache:
-        return _sheriff_owner_cache.get(case_num, "")
-    # Normalize case number
-    cn = re.sub(r"[\s\-]","",case_num.upper())
+async def pw_fetch(url,wait_ms=2500):
+    if not url or not url.startswith("http"): return ""
     try:
-        # Try CPC case search
-        params = {"casenumber": case_num, "court": "CV"}
-        r = requests.get(LC_CPC_CASE, params=params, headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, "lxml")
-            text = soup.get_text(" ")
-            # Look for defendant name
-            for pat in [
-                r"(?:defendant|mortgagor|owner)[:\s]+([A-Z][A-Za-z\s,\.]{3,40}?)(?:,|\.|$|\n)",
-                r"vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:\s+whose|\s+last|,|\.|$)",
-            ]:
-                m = re.search(pat, text, re.IGNORECASE)
-                if m:
-                    name = clean(m.group(1)).title()
-                    if not is_boilerplate(name) and len(name) >= 4:
-                        _sheriff_owner_cache[case_num] = name
-                        return name
+        async with async_playwright() as p:
+            browser=await p.chromium.launch(headless=True,
+                args=["--no-sandbox","--disable-blink-features=AutomationControlled",
+                      "--disable-dev-shm-usage","--disable-gpu"])
+            ctx=await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width":1366,"height":768},locale="en-US",timezone_id="America/New_York")
+            await ctx.add_init_script("""
+                Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+                Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
+                window.chrome={runtime:{}};""")
+            page=await ctx.new_page()
+            try:
+                domain=re.match(r"https?://[^/]+",url)
+                if domain:
+                    try:
+                        await page.goto(domain.group(0),wait_until="domcontentloaded",timeout=15000)
+                        await page.wait_for_timeout(400+random.randint(0,200))
+                    except: pass
+                await page.goto(url,wait_until="domcontentloaded",timeout=30000)
+                await page.wait_for_timeout(wait_ms+random.randint(0,400))
+                html=await page.content()
+                logging.info("pw_fetch %s chars from %s",len(html),url[:80])
+                return html
+            finally:
+                await page.close(); await browser.close()
     except Exception as e:
-        logging.debug("Sheriff owner lookup %s: %s", case_num, e)
-    _sheriff_owner_cache[case_num] = ""
-    return ""
+        logging.warning("pw_fetch failed %s: %s",url[:80],e); return ""
 
-# ── Auditor property search fallback ──────────────────────────────────────
-_auditor_cache: Dict[str, Optional[dict]] = {}
+def _redfin_strip(raw):
+    """Strip Redfin's security prefix."""
+    for pfx in ["{}&&","{}&&\n","while(1);","//","/**/"]:
+        if raw.lstrip().startswith(pfx):
+            return raw.lstrip()[len(pfx):]
+    return raw
 
-def auditor_lookup(owner: str) -> Optional[dict]:
-    key = norm_name(owner)
-    if key in _auditor_cache: return _auditor_cache[key]
-    if not owner or len(owner) < 4 or is_boilerplate(owner):
-        _auditor_cache[key] = None; return None
-    try:
-        r = requests.get(LC_AUDITOR_API,
-                         params={"query":owner,"type":"owner","limit":3},
-                         headers={**HEADERS,"Accept":"application/json"},
-                         timeout=8)
-        if r.status_code == 200:
-            data = r.json()
-            results = data.get("results", data.get("properties", data.get("data",[])))
-            if results and isinstance(results, list):
-                for item in results:
-                    addr = clean(item.get("address","") or item.get("siteAddress","") or "")
-                    if is_valid_address(addr):
-                        result = {
-                            "prop_address": addr.title(),
-                            "prop_city": clean(item.get("city","") or "Toledo").title(),
-                            "prop_zip":  clean(item.get("zip","") or item.get("zipCode","")),
-                            "parcel_id": clean(item.get("parcelId","") or item.get("parcel_id","")),
-                        }
-                        _auditor_cache[key] = result; return result
-    except Exception as e:
-        logging.debug("Auditor lookup %s: %s", owner[:25], e)
-    _auditor_cache[key] = None; return None
+def _walk_for_numbers(obj, min_val=50000, max_val=5000000, depth=0):
+    """
+    Recursively walk a JSON object looking for numeric values
+    that look like a home price (between min_val and max_val).
+    Returns (value, path) or (None, None).
+    """
+    if depth > 8: return None, None
+    if isinstance(obj, (int, float)):
+        try:
+            v = float(obj)
+            if min_val <= v <= max_val:
+                return v, ""
+        except: pass
+        return None, None
+    if isinstance(obj, str):
+        c = re.sub(r"[^0-9.]","",obj)
+        try:
+            v = float(c)
+            if min_val <= v <= max_val:
+                return v, ""
+        except: pass
+        return None, None
+    if isinstance(obj, dict):
+        # Prefer keys that look like AVM/price fields
+        priority_keys = ["avm","estimate","priceEstimate","estimatedValue",
+                         "value","price","zestimate","homeValue","marketValue",
+                         "estimatedMarketValue","predictedValue"]
+        for k in priority_keys:
+            if k in obj:
+                v, path = _walk_for_numbers(obj[k], min_val, max_val, depth+1)
+                if v: return v, f".{k}{path}"
+        for k, val in obj.items():
+            v, path = _walk_for_numbers(val, min_val, max_val, depth+1)
+            if v: return v, f".{k}{path}"
+    if isinstance(obj, list):
+        for i, item in enumerate(obj[:5]):
+            v, path = _walk_for_numbers(item, min_val, max_val, depth+1)
+            if v: return v, f"[{i}]{path}"
+    return None, None
 
-# ── Redfin AVM ─────────────────────────────────────────────────────────────
-def get_redfin_value(address: str, city: str = "Toledo",
-                     state: str = "OH", zip_code: str = "") -> Optional[dict]:
-    global REDFIN_CALLS
+def get_redfin_value(address, city="Toledo", state="OH", zip_code=""):
+    """
+    Get home value from Redfin's free API.
+    Uses deep JSON walk to find AVM regardless of response structure changes.
+    """
+    global REDFIN_CALLS, REDFIN_DEBUG_SAVED
     if not is_valid_address(address) or REDFIN_CALLS >= REDFIN_MAX_CALLS: return None
     full = f"{address}, {city}, {state}"
     if zip_code: full += f" {zip_code}"
     ck = norm_addr_key(full)
     if ck in REDFIN_CACHE: return REDFIN_CACHE[ck]
+
     try:
-        r = requests.get("https://www.redfin.com/stingray/do/location-autocomplete",
-                         params={"location":full,"v":"2","count":"5"},
-                         headers=REDFIN_HEADERS, timeout=12)
+        # Step 1: Autocomplete
+        r = requests.get(
+            "https://www.redfin.com/stingray/do/location-autocomplete",
+            params={"location":full,"v":"2","count":"5"},
+            headers=REDFIN_HEADERS, timeout=12
+        )
         REDFIN_CALLS += 1
-        if r.status_code != 200: REDFIN_CACHE[ck]=None; return None
-        raw = r.text
-        for pfx in ["{}&&","//","while(1);"]:
-            if raw.startswith(pfx): raw=raw[len(pfx):]; break
-        data = json.loads(raw)
+        if r.status_code != 200:
+            logging.debug("Redfin autocomplete %s: status %s", address[:30], r.status_code)
+            REDFIN_CACHE[ck]=None; return None
+
+        data = json.loads(_redfin_strip(r.text))
+        payload = data.get("payload",{})
+
+        # Find property URL
         prop_url = None
-        for section in data.get("payload",{}).get("sections",[]):
+        prop_id  = None
+        for section in payload.get("sections",[]):
             for row in section.get("rows",[]):
-                u = row.get("url","")
-                if u and "/home/" in u: prop_url=u; break
+                url_path = row.get("url","")
+                row_type = str(row.get("type",""))
+                if url_path and "/home/" in url_path:
+                    prop_url = url_path
+                    prop_id  = row.get("id",{}).get("tableId") if isinstance(row.get("id"),dict) else None
+                    break
             if prop_url: break
-        if not prop_url: REDFIN_CACHE[ck]=None; return None
-        time.sleep(1.5 + random.uniform(0,0.5))
-        r2 = requests.get("https://www.redfin.com/stingray/api/home/details/initialInfo",
-                          params={"path":prop_url,"accessLevel":"1"},
-                          headers=REDFIN_HEADERS, timeout=12)
+
+        if not prop_url:
+            logging.debug("Redfin: no property URL found for %s", address[:30])
+            REDFIN_CACHE[ck]=None; return None
+
+        # Step 2: Property details
+        time.sleep(1.5+random.uniform(0,0.5))
+        r2 = requests.get(
+            "https://www.redfin.com/stingray/api/home/details/initialInfo",
+            params={"path":prop_url,"accessLevel":"1"},
+            headers=REDFIN_HEADERS, timeout=12
+        )
         REDFIN_CALLS += 1
-        if r2.status_code != 200: REDFIN_CACHE[ck]=None; return None
-        raw2 = r2.text
-        for pfx in ["{}&&","//","while(1);"]:
-            if raw2.startswith(pfx): raw2=raw2[len(pfx):]; break
-        detail = json.loads(raw2)
+        if r2.status_code != 200:
+            logging.debug("Redfin detail %s: status %s", address[:30], r2.status_code)
+            REDFIN_CACHE[ck]=None; return None
+
+        detail = json.loads(_redfin_strip(r2.text))
         p2 = detail.get("payload",{})
+
+        # Save first response for debugging
+        if not REDFIN_DEBUG_SAVED:
+            REDFIN_DEBUG_SAVED = True
+            save_debug("redfin_response.json", json.dumps(p2, indent=2)[:30000])
+            logging.info("Saved Redfin response to data/debug/redfin_response.json")
+
         hi = p2.get("homeInfo",{})
-        avm = (hi.get("avm") or hi.get("priceEstimate") or hi.get("estimate") or
-               p2.get("avm") or p2.get("estimatedValue") or
-               p2.get("mediaBrowserInfo",{}).get("avm") or
-               p2.get("aboveTheFold",{}).get("avm"))
-        beds  = hi.get("beds") or hi.get("bedCount")
+
+        # Try explicit paths first (fastest)
+        avm = None
+        explicit_paths = [
+            hi.get("avm"),
+            hi.get("priceEstimate"),
+            hi.get("estimate"),
+            hi.get("estimatedValue"),
+            hi.get("homeValue"),
+            p2.get("avm"),
+            p2.get("estimatedValue"),
+            p2.get("priceEstimate"),
+        ]
+        for v in explicit_paths:
+            if v is not None:
+                try:
+                    fv = float(v)
+                    if 10000 <= fv <= 5000000:
+                        avm = fv; break
+                except: pass
+
+        # If explicit paths failed, DEEP WALK the entire payload
+        if not avm:
+            walked_val, walked_path = _walk_for_numbers(p2, min_val=10000, max_val=5000000)
+            if walked_val:
+                avm = walked_val
+                logging.info("Redfin deep-walk found AVM at path: %s -> $%,.0f", walked_path, avm)
+
+        # Extract property details
+        beds  = hi.get("beds")  or hi.get("bedCount")
         baths = hi.get("baths") or hi.get("bathCount")
-        sqft  = hi.get("sqFt") or hi.get("sqft") or hi.get("livingArea")
+        sqft  = hi.get("sqFt")  or hi.get("sqft") or hi.get("livingArea")
         lsp   = hi.get("lastSoldPrice") or hi.get("price")
         lsd   = hi.get("lastSoldDate","")
         lsy   = None
         if lsd:
-            try: lsy = datetime.strptime(str(lsd)[:10],"%Y-%m-%d").year
+            try: lsy=datetime.strptime(str(lsd)[:10],"%Y-%m-%d").year
             except:
-                try: lsy = int(str(lsd)[:4])
+                try: lsy=int(str(lsd)[:4])
                 except: pass
+
+        # Last resort: appreciate from last sale
         if not avm and lsp:
-            yrs = max(0, datetime.now().year-(lsy or datetime.now().year))
-            avm = round(float(lsp)*((1+OH_APPR_RATE)**yrs))
+            try:
+                fv=float(lsp)
+                if fv>5000:
+                    yrs=max(0,datetime.now().year-(lsy or datetime.now().year))
+                    avm=round(fv*((1+OH_APPR_RATE)**yrs))
+            except: pass
+
         if avm and float(avm)>5000:
-            result = {"avm":float(avm),"last_sale_price":float(lsp) if lsp else None,
-                      "last_sale_year":lsy,"beds":int(beds) if beds else None,
-                      "baths":float(baths) if baths else None,
-                      "sqft":int(sqft) if sqft else None}
+            result={"avm":float(avm),
+                    "last_sale_price":float(lsp) if lsp else None,
+                    "last_sale_year":lsy,
+                    "beds":int(beds)   if beds  else None,
+                    "baths":float(baths) if baths else None,
+                    "sqft":int(sqft)   if sqft  else None}
             REDFIN_CACHE[ck]=result
             logging.info("Redfin: %s -> $%,.0f (#%s)", address[:35], avm, REDFIN_CALLS)
             return result
-    except json.JSONDecodeError: pass
-    except Exception as e: logging.debug("Redfin %s: %s", address[:30], e)
+        else:
+            # Log what we got to understand the structure
+            if not REDFIN_DEBUG_SAVED:
+                logging.warning("Redfin: found property %s but no AVM. homeInfo keys: %s",
+                               prop_url[:40], list(hi.keys())[:10])
+
+    except json.JSONDecodeError as e:
+        logging.warning("Redfin JSON error %s: %s | raw[:100]=%s",
+                       address[:25], e, r2.text[:100] if 'r2' in dir() else "?")
+    except Exception as e:
+        logging.debug("Redfin failed %s: %s", address[:25], e)
+
     REDFIN_CACHE[ck]=None; return None
 
-def get_zillow_value(address: str, city: str = "Toledo",
-                     state: str = "OH", zip_code: str = "") -> Optional[float]:
+def get_zillow_value(address,city="Toledo",state="OH",zip_code=""):
     global ZILLOW_CALLS
     if not ZILLOW_API_KEY or not is_valid_address(address): return None
-    if ZILLOW_CALLS >= ZILLOW_MAX_CALLS: return None
-    full = f"{address}, {city}, {state}"
-    if zip_code: full += f" {zip_code}"
-    ck = norm_addr_key(full)
+    if ZILLOW_CALLS>=ZILLOW_MAX_CALLS: return None
+    full=f"{address}, {city}, {state}"
+    if zip_code: full+=f" {zip_code}"
+    ck=norm_addr_key(full)
     if ck in ZILLOW_CACHE: return ZILLOW_CACHE[ck]
     time.sleep(2.0+random.uniform(0,0.5))
     try:
-        hdrs = {"X-RapidAPI-Key":ZILLOW_API_KEY,"X-RapidAPI-Host":ZILLOW_API_HOST}
-        r = requests.get(f"https://{ZILLOW_API_HOST}/propertyExtendedSearch",
-                         headers=hdrs, params={"location":full}, timeout=10)
-        r.raise_for_status(); ZILLOW_CALLS += 1
-        props = r.json().get("props",[])
+        hdrs={"X-RapidAPI-Key":ZILLOW_API_KEY,"X-RapidAPI-Host":ZILLOW_API_HOST}
+        r=requests.get(f"https://{ZILLOW_API_HOST}/propertyExtendedSearch",
+                       headers=hdrs,params={"location":full},timeout=10)
+        r.raise_for_status(); ZILLOW_CALLS+=1
+        props=r.json().get("props",[])
         if props:
-            first = props[0]
-            z = (first.get("zestimate") or first.get("price") or
-                 first.get("hdpData",{}).get("homeInfo",{}).get("zestimate"))
+            first=props[0]
+            z=(first.get("zestimate") or first.get("price") or
+               first.get("hdpData",{}).get("homeInfo",{}).get("zestimate"))
             if z:
-                val = float(str(z).replace(",","").replace("$",""))
+                val=float(str(z).replace(",","").replace("$",""))
                 if val>1000: ZILLOW_CACHE[ck]=val; return val
-    except Exception as e: logging.debug("Zillow %s: %s", address[:30], e)
+    except Exception as e: logging.debug("Zillow %s: %s",address[:25],e)
     ZILLOW_CACHE[ck]=None; return None
 
-def get_best_value(record: "LeadRecord") -> tuple:
+def get_best_value(record):
     if is_valid_address(record.prop_address):
-        rf = get_redfin_value(record.prop_address, record.prop_city or "Toledo",
-                              record.prop_state or "OH", record.prop_zip or "")
+        rf=get_redfin_value(record.prop_address,record.prop_city or "Toledo",
+                             record.prop_state or "OH",record.prop_zip or "")
         if rf and rf.get("avm") and rf["avm"]>5000:
             if rf.get("last_sale_price") and not record.last_sale_price:
-                record.last_sale_price = rf["last_sale_price"]
+                record.last_sale_price=rf["last_sale_price"]
             if rf.get("last_sale_year") and not record.last_sale_year:
-                record.last_sale_year = rf["last_sale_year"]
-            if rf.get("beds")  and not record.beds:  record.beds  = rf["beds"]
-            if rf.get("baths") and not record.baths: record.baths = rf["baths"]
-            if rf.get("sqft")  and not record.sqft:  record.sqft  = rf["sqft"]
-            record.redfin_value = rf["avm"]
-            return rf["avm"], "Redfin AVM"
+                record.last_sale_year=rf["last_sale_year"]
+            if rf.get("beds")  and not record.beds:  record.beds=rf["beds"]
+            if rf.get("baths") and not record.baths: record.baths=rf["baths"]
+            if rf.get("sqft")  and not record.sqft:  record.sqft=rf["sqft"]
+            record.redfin_value=rf["avm"]; return rf["avm"],"Redfin AVM"
         if ZILLOW_API_KEY:
-            zv = get_zillow_value(record.prop_address, record.prop_city or "Toledo",
-                                  record.prop_state or "OH", record.prop_zip or "")
-            if zv and zv>5000:
-                record.zillow_value = zv; return zv, "Zillow Zestimate"
+            zv=get_zillow_value(record.prop_address,record.prop_city or "Toledo",
+                                record.prop_state or "OH",record.prop_zip or "")
+            if zv and zv>5000: record.zillow_value=zv; return zv,"Zillow Zestimate"
     if record.assessed_value and record.assessed_value>1000:
-        return round(record.assessed_value/0.35,2), "Assessed Value (est)"
+        return round(record.assessed_value/0.35,2),"Assessed Value (est)"
     if record.last_sale_price and record.last_sale_price>5000:
-        yrs = max(0, datetime.now().year-(record.last_sale_year or datetime.now().year))
-        return round(record.last_sale_price*((1+OH_APPR_RATE)**yrs),2), "Last Sale (appreciated)"
-    return None, ""
+        yrs=max(0,datetime.now().year-(record.last_sale_year or datetime.now().year))
+        return round(record.last_sale_price*((1+OH_APPR_RATE)**yrs),2),"Last Sale (appreciated)"
+    return None,""
 
-def estimate_financials(record: "LeadRecord") -> "LeadRecord":
+def estimate_financials(record):
     signals=[]; sto=0
     if not record.estimated_value:
-        val, source = get_best_value(record)
+        val,source=get_best_value(record)
         if val: record.estimated_value=val; record.value_source=source
-    mv = record.estimated_value
+    mv=record.estimated_value
     if record.last_sale_price and record.last_sale_year and record.last_sale_price>5000:
         yrs=max(0,min(30,datetime.now().year-record.last_sale_year))
         orig=record.last_sale_price*0.80; mr=0.065/12; n=360; paid=yrs*12
@@ -585,7 +539,7 @@ def estimate_financials(record: "LeadRecord") -> "LeadRecord":
         elif record.est_equity>0:     sto+=10
         else: signals.append("Underwater")
     if record.doc_type in {"LP","NOFC","SHERIFF"}: sto+=25; signals.append("Active foreclosure")
-    if record.doc_type=="PRO":    sto+=20; signals.append("Estate / probate")
+    if record.doc_type=="PRO":     sto+=20; signals.append("Estate / probate")
     if record.is_absentee:         sto+=15; signals.append("Absentee owner")
     if record.is_out_of_state:     sto+=10; signals.append("Out-of-state owner")
     if record.is_inherited:        sto+=20; signals.append("Inherited property")
@@ -599,27 +553,26 @@ def estimate_financials(record: "LeadRecord") -> "LeadRecord":
         record.flags.append("Subject-To Candidate")
     if sto>=70 and "Prime Subject-To" not in " ".join(record.flags):
         record.flags.append("Prime Subject-To")
-    record.subject_to_score=min(sto,100); record.mortgage_signals=signals
-    return record
+    record.subject_to_score=min(sto,100); record.mortgage_signals=signals; return record
 
-def score_record(record: "LeadRecord") -> int:
+def score_record(record):
     score=30; lf={f.lower() for f in record.flags}; fs=0
-    if "lis pendens"         in lf: fs+=20
-    if "pre-foreclosure"     in lf: fs+=20
-    if "judgment lien"       in lf: fs+=15
-    if "tax lien"            in lf: fs+=15
-    if "mechanic lien"       in lf: fs+=10
-    if "probate / estate"    in lf: fs+=15
+    if "lis pendens"          in lf: fs+=20
+    if "pre-foreclosure"      in lf: fs+=20
+    if "judgment lien"        in lf: fs+=15
+    if "tax lien"             in lf: fs+=15
+    if "mechanic lien"        in lf: fs+=10
+    if "probate / estate"     in lf: fs+=15
     if "sheriff sale scheduled" in lf: fs+=35
-    if "code violation"      in lf: fs+=20
-    if "eviction filed"      in lf: fs+=18
-    if "divorce filing"      in lf: fs+=15
-    if "absentee owner"      in lf: fs+=10
-    if "out-of-state owner"  in lf: fs+=12
-    if "bankruptcy"          in lf: fs+=12
-    if "inherited property"  in lf: fs+=15
+    if "code violation"       in lf: fs+=20
+    if "eviction filed"       in lf: fs+=18
+    if "divorce filing"       in lf: fs+=15
+    if "absentee owner"       in lf: fs+=10
+    if "out-of-state owner"   in lf: fs+=12
+    if "bankruptcy"           in lf: fs+=12
+    if "inherited property"   in lf: fs+=15
     if "subject-to candidate" in lf: fs+=15
-    if "prime subject-to"    in lf: fs+=20
+    if "prime subject-to"     in lf: fs+=20
     score+=min(fs,70)
     if "lis pendens" in lf and "pre-foreclosure" in lf: score+=20
     if record.amount is not None:
@@ -640,8 +593,7 @@ def score_record(record: "LeadRecord") -> int:
         if "Hot Stack" not in " ".join(record.flags): record.flags.append("Hot Stack")
     return min(score,100)
 
-# ── Parcel data loader ─────────────────────────────────────────────────────
-def _parse_prop_addr(raw: str) -> tuple:
+def _parse_prop_addr(raw):
     if not raw: return "","Toledo","OH",""
     raw=raw.strip()
     m=re.match(r"^(\d+\s+.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})\s+(\d{5})?$",raw)
@@ -649,8 +601,7 @@ def _parse_prop_addr(raw: str) -> tuple:
     m2=re.match(r"^(\d+\s+.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})$",raw)
     if m2: return clean(m2.group(1)).title(),clean(m2.group(2)).title(),m2.group(3).upper(),""
     return raw.title(),"Toledo","OH",""
-
-def _parse_mail_addr(raw: str) -> tuple:
+def _parse_mail_addr(raw):
     if not raw: return "","","",""
     raw=raw.strip()
     m=re.match(r"^(.+?),\s*([A-Za-z\s\.]+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)?$",raw)
@@ -658,99 +609,123 @@ def _parse_mail_addr(raw: str) -> tuple:
     m2=re.match(r"^(.+?),\s*([A-Za-z\s]+?)\s+([A-Z]{2})$",raw)
     if m2: return clean(m2.group(1)).title(),clean(m2.group(2)).title(),m2.group(3).upper(),""
     return raw.title(),"","",""
-
-def _build_addr_from_parts(R: dict) -> str:
-    parts = [R.get("ADRNO",""), R.get("ADRDIR",""), R.get("ADRSTR",""),
-             R.get("ADRSUF",""), R.get("ADRSUF2","")]
+def _build_addr_from_parts(R):
+    parts=[R.get("ADRNO",""),R.get("ADRDIR",""),R.get("ADRSTR",""),R.get("ADRSUF",""),R.get("ADRSUF2","")]
     return " ".join(p for p in parts if p and p!="None").strip().title()
 
-def load_parcel_data() -> Dict[str, dict]:
-    parcels: Dict[str, dict] = {}
+def load_parcel_data():
+    parcels={}
+    def add_rec(owner_raw,prop_street,prop_city,prop_state,prop_zip,
+                mail_street,mail_city,mail_state,mail_zip,parid,luc):
+        rec={"parcel_id":parid,"owner":owner_raw.title(),
+             "prop_address":prop_street,"prop_city":prop_city or "Toledo",
+             "prop_state":prop_state or "OH","prop_zip":prop_zip,
+             "mail_address":mail_street,"mail_city":mail_city,
+             "mail_state":mail_state or "OH","mail_zip":mail_zip,"luc":luc}
+        if prop_street:
+            ak=norm_addr_key(prop_street)
+            if ak: parcels[ak]=rec
+        if owner_raw:
+            for v in name_variants(owner_raw):
+                if f"OWNER:{v}" not in parcels: parcels[f"OWNER:{v}"]=rec
 
-    # Try DBF first
+    # DBF
     if DBF_PARCELS_ADDRESS.exists():
         try:
             from dbfread import DBF as DbfReader
-            logging.info("Loading ParcelsAddress.dbf ...")
-            count = 0
-            for row in DbfReader(str(DBF_PARCELS_ADDRESS), load=False, encoding="latin-1"):
+            logging.info("Loading DBF...")
+            count=0
+            for row in DbfReader(str(DBF_PARCELS_ADDRESS),load=False,encoding="latin-1"):
                 try:
-                    R = {k.upper(): clean(v) for k,v in dict(row).items()}
-                    owner_raw = R.get("OWNER","") or R.get("OWN","") or R.get("NAME","")
-                    prop_raw  = R.get("PROPERTY_A","")
-                    mail_raw  = R.get("MAILING_AD","")
-                    parid     = R.get("PARID",""); luc = R.get("LUC","")
+                    R={k.upper():clean(v) for k,v in dict(row).items()}
+                    owner_raw=R.get("OWNER","") or R.get("OWN","") or R.get("NAME","")
+                    prop_raw=R.get("PROPERTY_A","")
                     if not owner_raw and not prop_raw: continue
-                    prop_street,prop_city,prop_state,prop_zip = _parse_prop_addr(prop_raw)
-                    if not prop_street:
-                        prop_street = _build_addr_from_parts(R)
-                        prop_city   = R.get("CITY","Toledo").title()
-                        prop_zip    = R.get("ZIP","") or R.get("ZIP_CODE","")
-                    mail_street,mail_city,mail_state,mail_zip = _parse_mail_addr(mail_raw)
-                    if not prop_street: continue
-                    rec = {"parcel_id":parid,"owner":owner_raw.title(),
-                           "prop_address":prop_street,"prop_city":prop_city or "Toledo",
-                           "prop_state":prop_state or "OH","prop_zip":prop_zip,
-                           "mail_address":mail_street,"mail_city":mail_city,
-                           "mail_state":mail_state or "OH","mail_zip":mail_zip,"luc":luc}
-                    ak = norm_addr_key(prop_street)
-                    if ak: parcels[ak]=rec
-                    if owner_raw:
-                        for v in name_variants(owner_raw):
-                            if f"OWNER:{v}" not in parcels: parcels[f"OWNER:{v}"]=rec
+                    ps,pc,pst,pz=_parse_prop_addr(prop_raw)
+                    if not ps: ps=_build_addr_from_parts(R); pc=R.get("CITY","Toledo").title(); pz=R.get("ZIP","") or R.get("ZIP_CODE","")
+                    ms,mc,mst,mz=_parse_mail_addr(R.get("MAILING_AD",""))
+                    if not ps: continue
+                    add_rec(owner_raw,ps,pc,pst,pz,ms,mc,mst,mz,R.get("PARID",""),R.get("LUC",""))
                     count+=1
                 except: continue
-            logging.info("DBF: %s parcels loaded",count)
+            logging.info("DBF: %s parcels",count)
             if count>0: return parcels
-        except ImportError: logging.warning("dbfread not installed")
-        except Exception as e: logging.error("DBF error: %s",e)
+        except: pass
 
-    # Try CSV (from download_parcels.py)
+    # CSV
     if CSV_PARCELS_ADDRESS.exists():
-        logging.info("Loading ParcelsAddress.csv ...")
+        logging.info("Loading CSV...")
         count=0
         try:
             with CSV_PARCELS_ADDRESS.open(encoding="utf-8",errors="ignore") as f:
                 for row in csv.DictReader(f):
                     try:
-                        R = {k.upper(): clean(v) for k,v in row.items()}
-                        owner_raw = R.get("OWNER","") or R.get("OWN","") or R.get("NAME","")
-                        parid     = R.get("PARID",""); luc=R.get("LUC","")
-                        prop_raw  = R.get("PROPERTY_A","")
-                        if prop_raw:
-                            prop_street,prop_city,prop_state,prop_zip = _parse_prop_addr(prop_raw)
+                        R={k.upper():clean(v) for k,v in row.items()}
+                        owner_raw=R.get("OWNER","") or R.get("OWN","") or R.get("NAME","")
+                        parid=R.get("PARID",""); luc=R.get("LUC","")
+                        prop_raw=R.get("PROPERTY_A","")
+                        if prop_raw: ps,pc,pst,pz=_parse_prop_addr(prop_raw)
                         else:
-                            prop_street = _build_addr_from_parts(R)
-                            prop_city   = R.get("CITY","Toledo").title()
-                            prop_state  = "OH"
-                            prop_zip    = R.get("ZIP","") or R.get("ZIP_CODE","")
-                        mail_raw = R.get("MAILING_AD","")
-                        mail_street,mail_city,mail_state,mail_zip = _parse_mail_addr(mail_raw)
-                        if not prop_street and not owner_raw: continue
-                        rec = {"parcel_id":parid,"owner":owner_raw.title(),
-                               "prop_address":prop_street,"prop_city":prop_city or "Toledo",
-                               "prop_state":prop_state or "OH","prop_zip":prop_zip,
-                               "mail_address":mail_street,"mail_city":mail_city,
-                               "mail_state":mail_state or "OH","mail_zip":mail_zip,"luc":luc}
-                        if prop_street:
-                            ak=norm_addr_key(prop_street)
-                            if ak: parcels[ak]=rec
-                        if owner_raw:
-                            for v in name_variants(owner_raw):
-                                if f"OWNER:{v}" not in parcels: parcels[f"OWNER:{v}"]=rec
+                            ps=_build_addr_from_parts(R)
+                            pc=R.get("CITY","Toledo").title(); pst="OH"
+                            pz=R.get("ZIP","") or R.get("ZIP_CODE","")
+                        ms,mc,mst,mz=_parse_mail_addr(R.get("MAILING_AD",""))
+                        if not ps and not owner_raw: continue
+                        add_rec(owner_raw,ps,pc,pst,pz,ms,mc,mst,mz,parid,luc)
                         count+=1
                     except: continue
-            logging.info("CSV: %s parcels loaded | %s addr keys | %s owner keys",
-                         count,
-                         sum(1 for k in parcels if not k.startswith("OWNER:")),
+            logging.info("CSV: %s parcels | %s addr | %s owner",
+                         count,sum(1 for k in parcels if not k.startswith("OWNER:")),
                          sum(1 for k in parcels if k.startswith("OWNER:")))
         except Exception as e: logging.error("CSV error: %s",e)
-
     if not parcels:
-        logging.warning("No parcel data loaded — using per-record auditor API fallback")
+        logging.warning("No parcel data — auditor API fallback")
     return parcels
 
-def match_parcel(owner: str, prop_address: str, parcels: Dict[str,dict]) -> tuple:
+_auditor_cache: Dict[str,Optional[dict]]={}
+def auditor_lookup(owner):
+    key=norm_name(owner)
+    if key in _auditor_cache: return _auditor_cache[key]
+    if not owner or len(owner)<4 or is_boilerplate(owner):
+        _auditor_cache[key]=None; return None
+    try:
+        r=requests.get(LC_AUDITOR_API,
+                       params={"query":owner,"type":"owner","limit":3},
+                       headers={**HEADERS,"Accept":"application/json"},timeout=8)
+        if r.status_code==200:
+            data=r.json()
+            results=data.get("results",data.get("properties",data.get("data",[])))
+            if results and isinstance(results,list):
+                for item in results:
+                    addr=clean(item.get("address","") or item.get("siteAddress","") or "")
+                    if is_valid_address(addr):
+                        result={"prop_address":addr.title(),
+                                "prop_city":clean(item.get("city","") or "Toledo").title(),
+                                "prop_zip":clean(item.get("zip","") or item.get("zipCode","")),
+                                "parcel_id":clean(item.get("parcelId","") or item.get("parcel_id",""))}
+                        _auditor_cache[key]=result; return result
+    except Exception as e: logging.debug("Auditor %s: %s",owner[:20],e)
+    _auditor_cache[key]=None; return None
+
+_sheriff_cache: Dict[str,str]={}
+def lookup_sheriff_owner(case_num):
+    if case_num in _sheriff_cache: return _sheriff_cache[case_num]
+    try:
+        r=requests.get(LC_CPC_CASE,params={"casenumber":case_num,"court":"CV"},
+                       headers=HEADERS,timeout=10)
+        if r.status_code==200:
+            text=BeautifulSoup(r.text,"lxml").get_text(" ")
+            for pat in [r"(?:defendant|mortgagor)[:\s]+([A-Z][A-Za-z\s,\.]{3,40}?)(?:,|\.|$|\n)",
+                        r"vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:\s+whose|\s+last|,|\.|$)"]:
+                m=re.search(pat,text,re.IGNORECASE)
+                if m:
+                    name=clean(m.group(1)).title()
+                    if not is_boilerplate(name) and len(name)>=4:
+                        _sheriff_cache[case_num]=name; return name
+    except Exception as e: logging.debug("Sheriff owner %s: %s",case_num,e)
+    _sheriff_cache[case_num]=""; return ""
+
+def match_parcel(owner,prop_address,parcels):
     if not parcels: return None,"unmatched"
     if prop_address and is_valid_address(prop_address):
         k=norm_addr_key(prop_address)
@@ -766,58 +741,50 @@ def match_parcel(owner: str, prop_address: str, parcels: Dict[str,dict]) -> tupl
                 if f"OWNER:{part}" in parcels: return parcels[f"OWNER:{part}"],"name_lastname"
     return None,"unmatched"
 
-def enrich(record: "LeadRecord", parcels: Dict[str,dict]) -> "LeadRecord":
-    matched,method = match_parcel(record.owner, record.prop_address, parcels)
+def enrich(record,parcels):
+    matched,method=match_parcel(record.owner,record.prop_address,parcels)
     if matched is None and record.doc_type=="PRO" and record.decedent_name:
-        matched,method = match_parcel(record.decedent_name,"",parcels)
+        matched,method=match_parcel(record.decedent_name,"",parcels)
         if matched: method=f"probate_{method}"
     if matched is None and record.owner and not is_boilerplate(record.owner):
-        au = auditor_lookup(record.owner)
+        au=auditor_lookup(record.owner)
         if au: matched=au; method="auditor_api"
-
     if matched:
         if not is_valid_address(record.prop_address):
             record.prop_address=matched.get("prop_address","")
-        if not record.prop_city:   record.prop_city  =matched.get("prop_city","") or "Toledo"
-        if not record.prop_zip:    record.prop_zip   =matched.get("prop_zip","")
-        if not record.mail_address:record.mail_address=matched.get("mail_address","")
-        if not record.mail_city:   record.mail_city  =matched.get("mail_city","")
-        if not record.mail_state:  record.mail_state =matched.get("mail_state","OH")
-        if not record.mail_zip:    record.mail_zip   =matched.get("mail_zip","")
-        if not record.parcel_id:   record.parcel_id  =matched.get("parcel_id","")
-        if not record.luc:         record.luc        =matched.get("luc","")
+        if not record.prop_city:    record.prop_city  =matched.get("prop_city","") or "Toledo"
+        if not record.prop_zip:     record.prop_zip   =matched.get("prop_zip","")
+        if not record.mail_address: record.mail_address=matched.get("mail_address","")
+        if not record.mail_city:    record.mail_city  =matched.get("mail_city","")
+        if not record.mail_state:   record.mail_state =matched.get("mail_state","OH")
+        if not record.mail_zip:     record.mail_zip   =matched.get("mail_zip","")
+        if not record.parcel_id:    record.parcel_id  =matched.get("parcel_id","")
+        if not record.luc:          record.luc        =matched.get("luc","")
         if not record.assessed_value:  record.assessed_value  =matched.get("assessed_value")
         if not record.estimated_value: record.estimated_value =matched.get("est_market_value")
         record.match_method=method
         record.match_score={"address_exact":1.0,"name_exact":0.92,
                             "name_token_sorted":0.85,"name_lastname":0.65,
                             "auditor_api":0.80}.get(method.replace("probate_",""),0.75)
-
     if not record.prop_city:  record.prop_city ="Toledo"
     if not record.prop_state: record.prop_state="OH"
     if record.prop_address and not is_valid_address(record.prop_address):
         record.prop_address=""
-
     record.with_address    =1 if is_valid_address(record.prop_address) else 0
     record.is_absentee     =is_absentee(record.prop_address,record.mail_address,record.mail_state)
     record.is_out_of_state =is_oos(record.mail_state)
-
     if record.is_absentee     and "Absentee owner"     not in record.flags: record.flags.append("Absentee owner")
     if record.is_out_of_state and "Out-of-state owner" not in record.flags: record.flags.append("Out-of-state owner")
-
     record.flags=list(dict.fromkeys(record.flags+cat_flags(record.doc_type,record.owner)))
     record=estimate_financials(record); record.score=score_record(record)
     return record
 
-# ── SCRAPER 1: TLN Common Pleas ───────────────────────────────────────────
-async def scrape_tln_common_pleas() -> List[LeadRecord]:
-    records: List[LeadRecord]=[]; seen: set=set()
+async def scrape_tln_common_pleas():
+    records=[]; seen=set()
     logging.info("Scraping TLN Common Pleas...")
-    html=await pw_fetch(TLN_COMMON_PLEAS_URL, wait_ms=3000)
+    html=await pw_fetch(TLN_COMMON_PLEAS_URL,wait_ms=3000)
     if not html: return records
-    soup=BeautifulSoup(html,"lxml")
-    save_debug("tln_cp_index.html",html[:5000])
-
+    soup=BeautifulSoup(html,"lxml"); save_debug("tln_cp_index.html",html[:5000])
     article_links=[]
     for a in soup.select("a[href]"):
         href=clean(a.get("href",""))
@@ -831,32 +798,25 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
         d=(datetime.now()-timedelta(days=days_back)).strftime("%B-%-d-%Y").lower()
         url=f"{TLN_BASE}/courts/common_pleas/common-pleas-filings-received-on-{d}/"
         if url not in article_links: article_links.append(url)
-    logging.info("TLN CP: %s URLs", len(article_links))
-
+    logging.info("TLN CP: %s URLs",len(article_links))
     for url in article_links[:20]:
         try:
             art_html=await pw_fetch(url,wait_ms=2000)
             if not art_html or len(art_html)<500: continue
             text=BeautifulSoup(art_html,"lxml").get_text(" ")
             if "404" in text[:300] or "not found" in text[:300].lower(): continue
-
-            # Foreclosure with address
             fc_pat=re.compile(
                 r"(CI[0-9]{4}[0-9]+)\s+(.{5,80}?)\s+vs\.?\s+(.{5,80}?)\.\s+"
                 r".*?(?:foreclosure of mtg on|property located at|premises known as|real estate located at)\s+"
                 r"([0-9]{1,5}\s+[A-Za-z][A-Za-z0-9\s\.]{3,35}),"
                 r"\s*([A-Za-z\s]+),\s*Ohio\s*([0-9]{5})?",
-                re.IGNORECASE|re.DOTALL
-            )
+                re.IGNORECASE|re.DOTALL)
             for m in fc_pat.finditer(text):
                 doc_num=clean(m.group(1))
                 if doc_num in seen: continue
                 seen.add(doc_num)
                 defendant=clean(m.group(3)).title()
                 if is_boilerplate(defendant): defendant=""
-                prop_address=clean(m.group(4)).title()
-                prop_city=clean(m.group(5)).title()
-                prop_zip=clean(m.group(6)) if m.group(6) else ""
                 amt_m=re.search(r"\$\s*([\d,]+(?:\.\d{2})?)",text[m.start():m.start()+300])
                 filed=try_parse_date(text[max(0,m.start()-200):m.start()+50]) or datetime.now().date().isoformat()
                 if not is_recent(filed): continue
@@ -865,17 +825,14 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                     cat="NOFC",cat_label="Pre-foreclosure",
                     owner=defendant,grantee=clean(m.group(2)),
                     amount=parse_amount(amt_m.group(1)) if amt_m else None,
-                    prop_address=prop_address,prop_city=prop_city,
-                    prop_state="OH",prop_zip=prop_zip,clerk_url=url,
-                    flags=["Pre-foreclosure","Lis pendens"],
-                    distress_sources=["foreclosure","lis_pendens"],
-                ))
-
-            # Divorce
+                    prop_address=clean(m.group(4)).title(),
+                    prop_city=clean(m.group(5)).title(),prop_state="OH",
+                    prop_zip=clean(m.group(6)) if m.group(6) else "",
+                    clerk_url=url,flags=["Pre-foreclosure","Lis pendens"],
+                    distress_sources=["foreclosure","lis_pendens"]))
             dr_pat=re.compile(
                 r"(DR[0-9]{4}[0-9\-]+|DM[0-9]+)[;,\s]+([A-Z][A-Za-z\s,\.]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:[;,\.]|\s{2}|$)",
-                re.IGNORECASE
-            )
+                re.IGNORECASE)
             for m in dr_pat.finditer(text):
                 doc_num=clean(m.group(1))
                 if doc_num in seen: continue
@@ -888,15 +845,10 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                     doc_num=doc_num,doc_type="DIVORCE",filed=filed,
                     cat="DIVORCE",cat_label="Divorce Filing",
                     owner=plaintiff,grantee=clean(m.group(3)).title(),
-                    clerk_url=url,flags=["Divorce filing"],
-                    distress_sources=["divorce"],
-                ))
-
-            # Lien vs
+                    clerk_url=url,flags=["Divorce filing"],distress_sources=["divorce"]))
             ln_pat=re.compile(
                 r"(LN[0-9]{4}[0-9\-]+)[;,\s]+([^;,\n]{3,80}?)\s+vs\.?\s+([^;,\n\.]{3,60}?)(?:[;,\.]|\s{2}|$)",
-                re.IGNORECASE
-            )
+                re.IGNORECASE)
             for m in ln_pat.finditer(text):
                 doc_num=clean(m.group(1))
                 if doc_num in seen: continue
@@ -908,19 +860,15 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                 dt=infer_doc_type(clean(m.group(2))) or "LNFED"
                 amt_m=re.search(r"\$\s*([\d,]+(?:\.\d{2})?)",text[m.start():m.start()+200])
                 records.append(LeadRecord(
-                    doc_num=doc_num,doc_type=dt,filed=filed,
-                    cat=dt,cat_label=LEAD_TYPE_MAP.get(dt,dt),
-                    owner=owner,grantee=clean(m.group(2)),
+                    doc_num=doc_num,doc_type=dt,filed=filed,cat=dt,
+                    cat_label=LEAD_TYPE_MAP.get(dt,dt),owner=owner,
+                    grantee=clean(m.group(2)),
                     amount=parse_amount(amt_m.group(1)) if amt_m else None,
                     clerk_url=url,flags=cat_flags(dt,owner),
-                    distress_sources=[s for s in [classify_distress(dt)] if s],
-                ))
-
-            # Semicolon lien list
+                    distress_sources=[s for s in [classify_distress(dt)] if s]))
             sc_pat=re.compile(
                 r"(LN[0-9]{4}[0-9\-]+)[;, ]+\$?([\d,\.]+)[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,60})[;, ]+([^;\n]{3,80})",
-                re.IGNORECASE
-            )
+                re.IGNORECASE)
             for m in sc_pat.finditer(text):
                 doc_num=clean(m.group(1))
                 if doc_num in seen: continue
@@ -937,38 +885,33 @@ async def scrape_tln_common_pleas() -> List[LeadRecord]:
                 city_m=re.search(r"(TOLEDO|MAUMEE|SYLVANIA|OREGON|PERRYSBURG|WATERVILLE|WHITEHOUSE|HOLLAND|SWANTON)",addr_raw,re.IGNORECASE)
                 zip_m=re.search(r"(43\d{3})",addr_raw)
                 records.append(LeadRecord(
-                    doc_num=doc_num,doc_type=dt,filed=filed,
-                    cat=dt,cat_label=LEAD_TYPE_MAP.get(dt,dt),
-                    owner=owner,grantee=clean(m.group(3)),amount=amt,
+                    doc_num=doc_num,doc_type=dt,filed=filed,cat=dt,
+                    cat_label=LEAD_TYPE_MAP.get(dt,dt),owner=owner,
+                    grantee=clean(m.group(3)),amount=amt,
                     prop_address=clean(addr_m.group(1)).title() if addr_m else "",
                     prop_city=clean(city_m.group(0)).title() if city_m else "Toledo",
                     prop_state="OH",prop_zip=zip_m.group(1) if zip_m else "",
                     clerk_url=url,flags=cat_flags(dt,owner),
-                    distress_sources=[s for s in [classify_distress(dt)] if s],
-                ))
+                    distress_sources=[s for s in [classify_distress(dt)] if s]))
             await asyncio.sleep(1.5+random.uniform(0,1))
-        except Exception as e:
-            logging.warning("TLN CP %s: %s",url[-50:],e)
+        except Exception as e: logging.warning("TLN CP %s: %s",url[-50:],e)
     logging.info("TLN Common Pleas: %s records",len(records))
     return records
 
-# ── SCRAPER 2: TLN Foreclosure Notices ────────────────────────────────────
-async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
-    records: List[LeadRecord]=[]; seen: set=set()
+async def scrape_tln_foreclosure_notices():
+    records=[]; seen=set()
     logging.info("Scraping TLN Foreclosure Notices...")
     ADDRESS_PAT=re.compile(
         r'(\d{1,5}\s+[A-Za-z][A-Za-z0-9\s\.,#\-]{3,50}),\s+'
         r'(?:Toledo|Maumee|Perrysburg|Sylvania|Oregon|Waterville|Whitehouse|Holland|Swanton),?\s+'
-        r'OH\s+(\d{5})',re.IGNORECASE
-    )
+        r'OH\s+(\d{5})',re.IGNORECASE)
     OWNER_PATS=[
         re.compile(r'(?:defendant|owner|mortgagor)[s]?[:\s]+([A-Z][A-Za-z][A-Za-z\s,\.]{2,50}?)(?:,|\.|whose|last known|and\s+Jane|and\s+John)',re.IGNORECASE),
         re.compile(r'vs\.?\s+([A-Z][A-Za-z][A-Za-z\s,\.]{2,40}?)(?:\s+whose|\s+last|\s+an\s+individual|,|\.|$)',re.IGNORECASE),
     ]
     html=await pw_fetch(TLN_FORECLOSURES_URL,wait_ms=3000)
     if not html: return records
-    soup=BeautifulSoup(html,"lxml")
-    case_links=[]
+    soup=BeautifulSoup(html,"lxml"); case_links=[]
     for a in soup.select("a[href]"):
         href=clean(a.get("href","")); text=clean(a.get_text())
         if not href or is_noise(text) or is_noise(href): continue
@@ -1007,53 +950,30 @@ async def scrape_tln_foreclosure_notices() -> List[LeadRecord]:
             dt="TAX" if is_tax else "NOFC"
             filed=try_parse_date(text[:500]) or datetime.now().date().isoformat()
             records.append(LeadRecord(
-                doc_num=doc_num,doc_type=dt,filed=filed,
-                cat=dt,cat_label=LEAD_TYPE_MAP.get(dt,dt),
-                owner=owner,amount=parse_amount(amt_m.group(1)) if amt_m else None,
+                doc_num=doc_num,doc_type=dt,filed=filed,cat=dt,
+                cat_label=LEAD_TYPE_MAP.get(dt,dt),owner=owner,
+                amount=parse_amount(amt_m.group(1)) if amt_m else None,
                 prop_address=prop_address,prop_city=prop_city,
                 prop_state="OH",prop_zip=prop_zip,clerk_url=url,
                 flags=["Pre-foreclosure"]+(["Tax lien"] if is_tax else []),
-                distress_sources=["foreclosure"]+(["tax_delinquent"] if is_tax else []),
-            ))
+                distress_sources=["foreclosure"]+(["tax_delinquent"] if is_tax else [])))
             await asyncio.sleep(1+random.uniform(0,0.5))
-        except Exception as e:
-            logging.warning("TLN FC %s: %s",url[-50:],e)
+        except Exception as e: logging.warning("TLN FC %s: %s",url[-50:],e)
     logging.info("TLN Foreclosure Notices: %s records",len(records))
     return records
 
-# ── SCRAPER 3: Sheriff Sales ───────────────────────────────────────────────
-async def scrape_sheriff_sales() -> List[LeadRecord]:
-    """
-    RealForeclose platform — owner data is in the individual case detail pages.
-    Each case links to a detail page that has the defendant name in static HTML.
-    We also cross-reference with the LC CPC case search for owner names.
-    """
-    records: List[LeadRecord]=[]; seen=set()
+async def scrape_sheriff_sales():
+    records=[]; seen=set()
     logging.info("Scraping sheriff sales...")
-
     for days_ahead in range(0,45):
         sale_date=(datetime.now()+timedelta(days=days_ahead)).strftime("%m/%d/%Y")
         url=f"{SHERIFF_BASE}/index.cfm?zaction=AUCTION&Zmethod=PREVIEW&AUCTIONDATE={quote(sale_date)}"
         try:
-            html=await pw_fetch(url,wait_ms=5000)  # extra wait for JS
+            html=await pw_fetch(url,wait_ms=5000)
             if not html or len(html)<500: continue
-            soup=BeautifulSoup(html,"lxml")
-            text=soup.get_text(" ")
+            soup=BeautifulSoup(html,"lxml"); text=soup.get_text(" ")
             if "no auction" in text.lower() or "no properties" in text.lower(): continue
             save_debug("sheriff_page.html",html[:5000])
-
-            # Try to get individual case detail links
-            for a in soup.select("a[href]"):
-                href=clean(a.get("href",""))
-                if "zaction=AUCTION" in href and ("VIEW" in href.upper() or "DETAIL" in href.upper()):
-                    full=href if href.startswith("http") else f"{SHERIFF_BASE}{href}"
-                    case_m=re.search(r"CASENUM=([^&]+)|zcase=([^&]+)",href,re.IGNORECASE)
-                    if case_m:
-                        doc_num=clean(case_m.group(1) or case_m.group(2))
-                        if doc_num not in seen:
-                            # Queue for detail fetch
-                            pass
-
             for row in soup.select("tr,.AUCTION_ITEM,.property-item"):
                 item_text=clean(row.get_text(" "))
                 if len(item_text)<20: continue
@@ -1062,38 +982,23 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
                 doc_num=clean(case_m.group(1))
                 if doc_num in seen: continue
                 seen.add(doc_num)
-
                 addr_m=re.search(
                     r"(\d{2,5}\s+[A-Z][A-Za-z\s\.]{3,35}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL|WAY|TER|CIR|PKWY)\.?)",
-                    item_text,re.IGNORECASE
-                )
+                    item_text,re.IGNORECASE)
                 prop_address=clean(addr_m.group(1)).title() if addr_m else ""
                 if not is_valid_address(prop_address): prop_address=""
-
                 amt_m=re.search(r"(?:Appraised|Value|Bid)[:\s]*\$?([\d,]+)",item_text,re.IGNORECASE)
                 if not amt_m: amt_m=re.search(r"\$([\d,]+(?:\.\d{2})?)",item_text)
                 amt=parse_amount(amt_m.group(1)) if amt_m else None
-
                 city_m=re.search(r"(Toledo|Maumee|Sylvania|Oregon|Perrysburg|Waterville|Whitehouse|Holland)",item_text,re.IGNORECASE)
                 zip_m=re.search(r"(43\d{3})",item_text)
-
-                # Try to get owner from case table cell
                 owner=""
-                owner_m=re.search(
-                    r"(?:defendant|titled|owner)[:\s]+([A-Z][A-Za-z\s]{3,40}?)(?:,|\.|$|\n)",
-                    item_text,re.IGNORECASE
-                )
+                owner_m=re.search(r"(?:defendant|titled|owner)[:\s]+([A-Z][A-Za-z\s]{3,40}?)(?:,|\.|$|\n)",item_text,re.IGNORECASE)
                 if owner_m and not is_boilerplate(owner_m.group(1)):
                     owner=clean(owner_m.group(1)).title()
-
-                # If still no owner and we have a case number, try CPC lookup
-                # (async-safe: do it synchronously since it's a quick GET)
-                if not owner and doc_num:
-                    owner=lookup_sheriff_owner(doc_num)
-
+                if not owner and doc_num: owner=lookup_sheriff_owner(doc_num)
                 try: filed=datetime.strptime(sale_date,"%m/%d/%Y").date().isoformat()
                 except: filed=datetime.now().date().isoformat()
-
                 records.append(LeadRecord(
                     doc_num=doc_num,doc_type="SHERIFF",filed=filed,
                     cat="SHERIFF",cat_label="Sheriff Sale",
@@ -1105,18 +1010,14 @@ async def scrape_sheriff_sales() -> List[LeadRecord]:
                     flags=["Sheriff sale scheduled","Pre-foreclosure","Hot Stack"],
                     distress_sources=["sheriff_sale","foreclosure"],
                     distress_count=2,hot_stack=True,
-                    with_address=1 if is_valid_address(prop_address) else 0,
-                ))
+                    with_address=1 if is_valid_address(prop_address) else 0))
             await asyncio.sleep(1.5)
-        except Exception as e:
-            logging.warning("Sheriff %s: %s",sale_date,e)
-
+        except Exception as e: logging.warning("Sheriff %s: %s",sale_date,e)
     logging.info("Sheriff sales: %s",len(records))
     return records
 
-# ── SCRAPER 4: TLN Probate ────────────────────────────────────────────────
-async def scrape_tln_probate() -> List[LeadRecord]:
-    records: List[LeadRecord]=[]
+async def scrape_tln_probate():
+    records=[]
     logging.info("Scraping probate...")
     try:
         html=await pw_fetch(TLN_PROBATE_URL,wait_ms=3000)
@@ -1137,8 +1038,7 @@ async def scrape_tln_probate() -> List[LeadRecord]:
             except: pass
         estate_pat=re.compile(
             r"(?:Estate\s+of|In\s+re\s+Estate\s+of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})"
-            r"(?:,\s*(?:deceased|Deceased|DECEASED))?",re.IGNORECASE
-        )
+            r"(?:,\s*(?:deceased|Deceased|DECEASED))?",re.IGNORECASE)
         seen=set()
         for m in estate_pat.finditer(all_text):
             name=clean(m.group(1))
@@ -1156,16 +1056,13 @@ async def scrape_tln_probate() -> List[LeadRecord]:
                 executor_name=executor.title(),is_inherited=True,
                 flags=["Probate / estate","Inherited property"],
                 distress_sources=["probate"],distress_count=1,
-                clerk_url=TLN_PROBATE_URL,match_method="probate_name",
-            ))
-    except Exception as e:
-        logging.warning("Probate failed: %s",e)
+                clerk_url=TLN_PROBATE_URL,match_method="probate_name"))
+    except Exception as e: logging.warning("Probate: %s",e)
     logging.info("Probate: %s",len(records))
     return records
 
-# ── SCRAPER 5: Divorces ────────────────────────────────────────────────────
-async def scrape_divorces() -> List[LeadRecord]:
-    records: List[LeadRecord]=[]; seen: set=set()
+async def scrape_divorces():
+    records=[]; seen=set()
     logging.info("Scraping divorces...")
     try:
         html=await pw_fetch(TLN_DOMESTIC_URL,wait_ms=3000)
@@ -1186,8 +1083,7 @@ async def scrape_divorces() -> List[LeadRecord]:
                 except: pass
             dr_pat=re.compile(
                 r"(DR[0-9]{4}[0-9\-]+|DM[0-9]+)[;,\s]+([A-Z][A-Za-z\s,\.]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,\.]{3,40}?)(?:[;,\.]|\s{2}|$)",
-                re.IGNORECASE
-            )
+                re.IGNORECASE)
             for text in texts:
                 for m in dr_pat.finditer(text):
                     doc_num=clean(m.group(1))
@@ -1202,12 +1098,8 @@ async def scrape_divorces() -> List[LeadRecord]:
                         cat="DIVORCE",cat_label="Divorce Filing",
                         owner=plaintiff,grantee=clean(m.group(3)).title(),
                         clerk_url=TLN_DOMESTIC_URL,
-                        flags=["Divorce filing"],distress_sources=["divorce"],
-                    ))
-    except Exception as e:
-        logging.warning("Divorce TLN: %s",e)
-
-    # CPC public search
+                        flags=["Divorce filing"],distress_sources=["divorce"]))
+    except Exception as e: logging.warning("Divorce TLN: %s",e)
     try:
         for days_back in range(0,14):
             d=(datetime.now()-timedelta(days=days_back)).strftime("%m/%d/%Y")
@@ -1217,8 +1109,7 @@ async def scrape_divorces() -> List[LeadRecord]:
             text=BeautifulSoup(r.text,"lxml").get_text(" ")
             dr_pat2=re.compile(
                 r"(DR\s*\d{4}\s*\d{4,}|DM\s*\d{4}\s*\d{4,})\s+([A-Z][A-Za-z\s,]{3,40}?)\s+vs\.?\s+([A-Z][A-Za-z\s,]{3,40}?)(?:\s|$|,|\.)",
-                re.IGNORECASE
-            )
+                re.IGNORECASE)
             for m in dr_pat2.finditer(text):
                 doc_num=re.sub(r"\s+","",clean(m.group(1)))
                 if doc_num in seen: continue
@@ -1230,28 +1121,20 @@ async def scrape_divorces() -> List[LeadRecord]:
                     filed=datetime.now().date().isoformat(),
                     cat="DIVORCE",cat_label="Divorce Filing",
                     owner=plaintiff,grantee=clean(m.group(3)).title(),
-                    clerk_url=url,flags=["Divorce filing"],
-                    distress_sources=["divorce"],
-                ))
+                    clerk_url=url,flags=["Divorce filing"],distress_sources=["divorce"]))
             await asyncio.sleep(0.5)
-    except Exception as e:
-        logging.debug("CPC divorce: %s",e)
-
+    except Exception as e: logging.debug("CPC divorce: %s",e)
     logging.info("Divorces: %s",len(records))
     return records
 
-# ── SCRAPER 6: Tax Delinquent ──────────────────────────────────────────────
-async def scrape_tax_delinquent() -> List[LeadRecord]:
-    records: List[LeadRecord]=[]; seen=set()
+async def scrape_tax_delinquent():
+    records=[]; seen=set()
     logging.info("Scraping tax delinquent...")
     try:
         html=await pw_fetch(TLN_FORECLOSURES_URL,wait_ms=3000)
         if html:
             text=BeautifulSoup(html,"lxml").get_text(" ")
-            tf_pat=re.compile(
-                r"(TF[0-9]{4}[0-9\-]+|TF\s*[0-9]{6,})\s+(.{10,80}?)\s+\$?([\d,]+(?:\.\d{2})?)?",
-                re.IGNORECASE
-            )
+            tf_pat=re.compile(r"(TF[0-9]{4}[0-9\-]+|TF\s*[0-9]{6,})\s+(.{10,80}?)\s+\$?([\d,]+(?:\.\d{2})?)?",re.IGNORECASE)
             for m in tf_pat.finditer(text):
                 doc_num=re.sub(r"\s+","",clean(m.group(1)))
                 if doc_num in seen: continue
@@ -1260,25 +1143,20 @@ async def scrape_tax_delinquent() -> List[LeadRecord]:
                 try: amt=float(m.group(3).replace(",","")) if m.group(3) else None
                 except: amt=None
                 addr_m=re.search(r"(\d{2,5}\s+[A-Za-z][A-Za-z\s\.]{3,25}(?:ST|AVE|RD|DR|BLVD|LN|CT|PL)\.?)",raw,re.IGNORECASE)
-                prop_address=clean(addr_m.group(1)).title() if addr_m else ""
                 records.append(LeadRecord(
                     doc_num=doc_num,doc_type="TAX",
                     filed=datetime.now().date().isoformat(),
-                    cat="TAX",cat_label="Tax Delinquent",
-                    amount=amt,prop_address=prop_address,
+                    cat="TAX",cat_label="Tax Delinquent",amount=amt,
+                    prop_address=clean(addr_m.group(1)).title() if addr_m else "",
                     prop_city="Toledo",prop_state="OH",
                     clerk_url=TLN_FORECLOSURES_URL,
-                    flags=["Tax delinquent","Tax lien"],
-                    distress_sources=["tax_delinquent"],
-                ))
-    except Exception as e:
-        logging.warning("Tax delin: %s",e)
+                    flags=["Tax delinquent","Tax lien"],distress_sources=["tax_delinquent"]))
+    except Exception as e: logging.warning("Tax delin: %s",e)
     logging.info("Tax delinquent: %s",len(records))
     return records
 
-# ── Cross-stack + dedupe ───────────────────────────────────────────────────
-def cross_stack(records: List[LeadRecord]) -> List[LeadRecord]:
-    addr_map: Dict[str,List[int]]=defaultdict(list)
+def cross_stack(records):
+    addr_map=defaultdict(list)
     for i,r in enumerate(records):
         if is_valid_address(r.prop_address):
             k=norm_addr_key(r.prop_address)
@@ -1286,7 +1164,7 @@ def cross_stack(records: List[LeadRecord]) -> List[LeadRecord]:
     stacked=0
     for key,idxs in addr_map.items():
         if len(idxs)<2: continue
-        all_sources: set=set()
+        all_sources=set()
         for i in idxs: all_sources.update(records[i].distress_sources or [])
         if len(all_sources)<2: continue
         for i in idxs:
@@ -1300,7 +1178,7 @@ def cross_stack(records: List[LeadRecord]) -> List[LeadRecord]:
     logging.info("Cross-stacked %s property groups",stacked)
     return records
 
-def dedupe(records: List[LeadRecord]) -> List[LeadRecord]:
+def dedupe(records):
     final,seen=[],set()
     for r in records:
         nd=re.sub(r"^(PCF1|PCF2)-","",clean(r.doc_num).upper())
@@ -1309,74 +1187,69 @@ def dedupe(records: List[LeadRecord]) -> List[LeadRecord]:
         seen.add(key); final.append(r)
     return final
 
-# ── Output ─────────────────────────────────────────────────────────────────
-def split_name(n: str):
+def split_name(n):
     parts=clean(n).split()
     if not parts: return "",""
     return parts[0]," ".join(parts[1:]) if len(parts)>1 else ""
 
-def write_json(path: Path, payload: dict):
+def write_json(path,payload):
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_text(json.dumps(payload,indent=2),encoding="utf-8")
 
-def build_payload(records: List[LeadRecord]) -> dict:
+def build_payload(records):
     return {
-        "fetched_at":   datetime.now(timezone.utc).isoformat(),
-        "source":       SOURCE_NAME,
-        "date_range": {
-            "from":(datetime.now()-timedelta(days=LOOKBACK_DAYS)).date().isoformat(),
-            "to":  datetime.now().date().isoformat(),
-        },
-        "total":                len(records),
-        "with_address":         sum(1 for r in records if is_valid_address(r.prop_address)),
-        "hot_stack_count":      sum(1 for r in records if r.hot_stack),
-        "sheriff_sale_count":   sum(1 for r in records if r.doc_type=="SHERIFF"),
-        "probate_count":        sum(1 for r in records if r.doc_type=="PRO"),
-        "inherited_count":      sum(1 for r in records if r.is_inherited),
-        "tax_delinquent_count": sum(1 for r in records if r.doc_type=="TAX"),
-        "foreclosure_count":    sum(1 for r in records if r.doc_type in {"NOFC","LP"}),
-        "lien_count":           sum(1 for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX"}),
-        "absentee_count":       sum(1 for r in records if r.is_absentee),
-        "out_of_state_count":   sum(1 for r in records if r.is_out_of_state),
-        "subject_to_count":     sum(1 for r in records if r.subject_to_score>=50),
-        "divorce_count":        sum(1 for r in records if r.doc_type=="DIVORCE"),
+        "fetched_at":datetime.now(timezone.utc).isoformat(),
+        "source":SOURCE_NAME,
+        "date_range":{"from":(datetime.now()-timedelta(days=LOOKBACK_DAYS)).date().isoformat(),
+                      "to":datetime.now().date().isoformat()},
+        "total":len(records),
+        "with_address":sum(1 for r in records if is_valid_address(r.prop_address)),
+        "hot_stack_count":sum(1 for r in records if r.hot_stack),
+        "sheriff_sale_count":sum(1 for r in records if r.doc_type=="SHERIFF"),
+        "probate_count":sum(1 for r in records if r.doc_type=="PRO"),
+        "inherited_count":sum(1 for r in records if r.is_inherited),
+        "tax_delinquent_count":sum(1 for r in records if r.doc_type=="TAX"),
+        "foreclosure_count":sum(1 for r in records if r.doc_type in {"NOFC","LP"}),
+        "lien_count":sum(1 for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX"}),
+        "absentee_count":sum(1 for r in records if r.is_absentee),
+        "out_of_state_count":sum(1 for r in records if r.is_out_of_state),
+        "subject_to_count":sum(1 for r in records if r.subject_to_score>=50),
+        "divorce_count":sum(1 for r in records if r.doc_type=="DIVORCE"),
         "redfin_enriched_count":sum(1 for r in records if r.redfin_value),
         "zillow_enriched_count":sum(1 for r in records if r.zillow_value),
-        "redfin_calls":         REDFIN_CALLS,
-        "zillow_api_calls":     ZILLOW_CALLS,
-        "parcel_matched_count": sum(1 for r in records if r.match_method!="unmatched"),
-        "records":              [asdict(r) for r in records],
+        "redfin_calls":REDFIN_CALLS,
+        "zillow_api_calls":ZILLOW_CALLS,
+        "parcel_matched_count":sum(1 for r in records if r.match_method!="unmatched"),
+        "records":[asdict(r) for r in records],
     }
 
-def write_category_json(records: List[LeadRecord]):
+def write_category_json(records):
     categories={
-        "hot_stack":       [r for r in records if r.hot_stack],
-        "sheriff_sales":   [r for r in records if r.doc_type=="SHERIFF"],
-        "probate":         [r for r in records if r.doc_type=="PRO"],
-        "inherited":       [r for r in records if r.is_inherited],
-        "tax_delinquent":  [r for r in records if r.doc_type=="TAX"],
-        "foreclosure":     [r for r in records if r.doc_type in {"NOFC","LP","TAXDEED"}],
-        "pre_foreclosure": [r for r in records if r.doc_type in {"NOFC","LP"}],
-        "liens":           [r for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX","MEDLN"}],
-        "absentee":        [r for r in records if r.is_absentee],
-        "out_of_state":    [r for r in records if r.is_out_of_state],
-        "subject_to":      [r for r in records if r.subject_to_score>=50],
-        "divorces":        [r for r in records if r.doc_type=="DIVORCE"],
-        "code_violations": [r for r in records if r.doc_type=="CODEVIOLATION"],
-        "vacant_homes":    [r for r in records if r.is_vacant_home],
-        "vacant_land":     [r for r in records if r.is_vacant_land],
-        "evictions":       [r for r in records if r.doc_type=="EVICTION"],
+        "hot_stack":[r for r in records if r.hot_stack],
+        "sheriff_sales":[r for r in records if r.doc_type=="SHERIFF"],
+        "probate":[r for r in records if r.doc_type=="PRO"],
+        "inherited":[r for r in records if r.is_inherited],
+        "tax_delinquent":[r for r in records if r.doc_type=="TAX"],
+        "foreclosure":[r for r in records if r.doc_type in {"NOFC","LP","TAXDEED"}],
+        "pre_foreclosure":[r for r in records if r.doc_type in {"NOFC","LP"}],
+        "liens":[r for r in records if r.doc_type in {"LN","LNMECH","LNFED","LNIRS","LNCORPTX","MEDLN"}],
+        "absentee":[r for r in records if r.is_absentee],
+        "out_of_state":[r for r in records if r.is_out_of_state],
+        "subject_to":[r for r in records if r.subject_to_score>=50],
+        "divorces":[r for r in records if r.doc_type=="DIVORCE"],
+        "code_violations":[r for r in records if r.doc_type=="CODEVIOLATION"],
+        "vacant_homes":[r for r in records if r.is_vacant_home],
+        "vacant_land":[r for r in records if r.is_vacant_land],
+        "evictions":[r for r in records if r.doc_type=="EVICTION"],
     }
-    descs={
-        "hot_stack":"2+ distress signals","sheriff_sales":"Sheriff auction",
-        "probate":"Estate / probate","inherited":"Inherited properties",
-        "tax_delinquent":"Tax delinquent","foreclosure":"Active foreclosures",
-        "pre_foreclosure":"Pre-foreclosure & lis pendens","liens":"Liens",
-        "absentee":"Absentee owners","out_of_state":"Out-of-state owners",
-        "subject_to":"Subject-To candidates","divorces":"Divorce filings",
-        "code_violations":"Code violations","vacant_homes":"Vacant homes",
-        "vacant_land":"Vacant land","evictions":"Eviction filings",
-    }
+    descs={"hot_stack":"2+ distress signals","sheriff_sales":"Sheriff auction",
+           "probate":"Estate / probate","inherited":"Inherited properties",
+           "tax_delinquent":"Tax delinquent","foreclosure":"Active foreclosures",
+           "pre_foreclosure":"Pre-foreclosure & lis pendens","liens":"Liens",
+           "absentee":"Absentee owners","out_of_state":"Out-of-state owners",
+           "subject_to":"Subject-To candidates","divorces":"Divorce filings",
+           "code_violations":"Code violations","vacant_homes":"Vacant homes",
+           "vacant_land":"Vacant land","evictions":"Eviction filings"}
     for cat,recs in categories.items():
         recs_s=sorted(recs,key=lambda r:(r.hot_stack,r.distress_count,r.subject_to_score,r.score),reverse=True)
         payload={"fetched_at":datetime.now(timezone.utc).isoformat(),"source":SOURCE_NAME,
@@ -1386,118 +1259,94 @@ def write_category_json(records: List[LeadRecord]):
             write_json(path,payload)
         logging.info("Wrote %s: %s records",cat,len(recs_s))
 
-def write_csv(records: List[LeadRecord], csv_path: Path):
+def write_csv(records,csv_path):
     csv_path.parent.mkdir(parents=True,exist_ok=True)
-    fieldnames=[
-        "First Name","Last Name","Mailing Address","Mailing City","Mailing State","Mailing Zip",
-        "Property Address","Property City","Property State","Property Zip",
-        "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
-        "Seller Score","Subject-To Score","Motivated Seller Flags","Distress Sources","Distress Count",
-        "Hot Stack","Absentee Owner","Out-of-State Owner","Inherited",
-        "Assessed Value","Est Market Value","Redfin AVM","Zillow Value","Value Source",
-        "Beds","Baths","Sq Ft","Last Sale Price","Last Sale Year",
-        "Est Equity","Est Arrears","Est Payoff","Mortgage Signals",
-        "Parcel ID","LUC Code","Match Method","Match Score","Source","Public Records URL",
-    ]
+    fieldnames=["First Name","Last Name","Mailing Address","Mailing City","Mailing State","Mailing Zip",
+                "Property Address","Property City","Property State","Property Zip",
+                "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
+                "Seller Score","Subject-To Score","Motivated Seller Flags","Distress Sources","Distress Count",
+                "Hot Stack","Absentee Owner","Out-of-State Owner","Inherited",
+                "Assessed Value","Est Market Value","Redfin AVM","Zillow Value","Value Source",
+                "Beds","Baths","Sq Ft","Last Sale Price","Last Sale Year",
+                "Est Equity","Est Arrears","Est Payoff","Mortgage Signals",
+                "Parcel ID","LUC Code","Match Method","Match Score","Source","Public Records URL"]
     with csv_path.open("w",newline="",encoding="utf-8") as f:
         w=csv.DictWriter(f,fieldnames=fieldnames)
         w.writeheader()
         for r in records:
             fn,ln=split_name(r.owner)
-            w.writerow({
-                "First Name":fn,"Last Name":ln,
-                "Mailing Address":r.mail_address,"Mailing City":r.mail_city,
-                "Mailing State":r.mail_state,"Mailing Zip":r.mail_zip,
-                "Property Address":r.prop_address,"Property City":r.prop_city,
-                "Property State":r.prop_state,"Property Zip":r.prop_zip,
-                "Lead Type":r.cat_label,"Document Type":r.doc_type,
-                "Date Filed":r.filed,"Document Number":r.doc_num,
-                "Amount/Debt Owed":f"${r.amount:,.2f}" if r.amount else "",
-                "Seller Score":r.score,"Subject-To Score":r.subject_to_score,
-                "Motivated Seller Flags":"; ".join(r.flags),
-                "Distress Sources":"; ".join(r.distress_sources),
-                "Distress Count":r.distress_count,
-                "Hot Stack":"YES" if r.hot_stack else "",
-                "Absentee Owner":"YES" if r.is_absentee else "",
-                "Out-of-State Owner":"YES" if r.is_out_of_state else "",
-                "Inherited":"YES" if r.is_inherited else "",
-                "Assessed Value":f"${r.assessed_value:,.0f}" if r.assessed_value else "",
-                "Est Market Value":f"${r.estimated_value:,.0f}" if r.estimated_value else "",
-                "Redfin AVM":f"${r.redfin_value:,.0f}" if r.redfin_value else "",
-                "Zillow Value":f"${r.zillow_value:,.0f}" if r.zillow_value else "",
-                "Value Source":r.value_source,
-                "Beds":r.beds or "","Baths":r.baths or "","Sq Ft":r.sqft or "",
-                "Last Sale Price":f"${r.last_sale_price:,.0f}" if r.last_sale_price else "",
-                "Last Sale Year":r.last_sale_year or "",
-                "Est Equity":f"${r.est_equity:,.0f}" if r.est_equity is not None else "",
-                "Est Arrears":f"${r.est_arrears:,.0f}" if r.est_arrears else "",
-                "Est Payoff":f"${r.est_payoff:,.0f}" if r.est_payoff else "",
-                "Mortgage Signals":"; ".join(r.mortgage_signals),
-                "Parcel ID":r.parcel_id,"LUC Code":r.luc,
-                "Match Method":r.match_method,"Match Score":f"{r.match_score:.2f}",
-                "Source":SOURCE_NAME,"Public Records URL":r.clerk_url,
-            })
+            w.writerow({"First Name":fn,"Last Name":ln,
+                        "Mailing Address":r.mail_address,"Mailing City":r.mail_city,
+                        "Mailing State":r.mail_state,"Mailing Zip":r.mail_zip,
+                        "Property Address":r.prop_address,"Property City":r.prop_city,
+                        "Property State":r.prop_state,"Property Zip":r.prop_zip,
+                        "Lead Type":r.cat_label,"Document Type":r.doc_type,
+                        "Date Filed":r.filed,"Document Number":r.doc_num,
+                        "Amount/Debt Owed":f"${r.amount:,.2f}" if r.amount else "",
+                        "Seller Score":r.score,"Subject-To Score":r.subject_to_score,
+                        "Motivated Seller Flags":"; ".join(r.flags),
+                        "Distress Sources":"; ".join(r.distress_sources),
+                        "Distress Count":r.distress_count,
+                        "Hot Stack":"YES" if r.hot_stack else "",
+                        "Absentee Owner":"YES" if r.is_absentee else "",
+                        "Out-of-State Owner":"YES" if r.is_out_of_state else "",
+                        "Inherited":"YES" if r.is_inherited else "",
+                        "Assessed Value":f"${r.assessed_value:,.0f}" if r.assessed_value else "",
+                        "Est Market Value":f"${r.estimated_value:,.0f}" if r.estimated_value else "",
+                        "Redfin AVM":f"${r.redfin_value:,.0f}" if r.redfin_value else "",
+                        "Zillow Value":f"${r.zillow_value:,.0f}" if r.zillow_value else "",
+                        "Value Source":r.value_source,
+                        "Beds":r.beds or "","Baths":r.baths or "","Sq Ft":r.sqft or "",
+                        "Last Sale Price":f"${r.last_sale_price:,.0f}" if r.last_sale_price else "",
+                        "Last Sale Year":r.last_sale_year or "",
+                        "Est Equity":f"${r.est_equity:,.0f}" if r.est_equity is not None else "",
+                        "Est Arrears":f"${r.est_arrears:,.0f}" if r.est_arrears else "",
+                        "Est Payoff":f"${r.est_payoff:,.0f}" if r.est_payoff else "",
+                        "Mortgage Signals":"; ".join(r.mortgage_signals),
+                        "Parcel ID":r.parcel_id,"LUC Code":r.luc,
+                        "Match Method":r.match_method,"Match Score":f"{r.match_score:.2f}",
+                        "Source":SOURCE_NAME,"Public Records URL":r.clerk_url})
     logging.info("Wrote CSV: %s (%s rows)",csv_path,len(records))
 
-# ── Main ───────────────────────────────────────────────────────────────────
 async def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument("--out-csv",     default=str(DEFAULT_ENRICHED_CSV_PATH))
-    ap.add_argument("--dbf-address", default="")
+    ap.add_argument("--out-csv",default=str(DEFAULT_ENRICHED_CSV_PATH))
+    ap.add_argument("--dbf-address",default="")
     args=ap.parse_args()
-
     global DBF_PARCELS_ADDRESS
     if args.dbf_address: DBF_PARCELS_ADDRESS=Path(args.dbf_address)
-
     ensure_dirs(); log_setup()
     logging.info("=== Toledo / Lucas County Motivated Seller Intelligence v3 ===")
     logging.info("Zillow   : %s","ENABLED" if ZILLOW_API_KEY else "DISABLED")
-    logging.info("Redfin   : ENABLED (free)")
+    logging.info("Redfin   : ENABLED (free, deep-walk AVM parser)")
     logging.info("DBF      : %s (exists=%s)",DBF_PARCELS_ADDRESS,DBF_PARCELS_ADDRESS.exists())
     logging.info("CSV      : %s (exists=%s)",CSV_PARCELS_ADDRESS,CSV_PARCELS_ADDRESS.exists())
-
     parcels=load_parcel_data()
-
-    cp_recs,fc_recs,sh_recs,pr_recs,dv_recs,tx_recs = await asyncio.gather(
-        scrape_tln_common_pleas(),
-        scrape_tln_foreclosure_notices(),
-        scrape_sheriff_sales(),
-        scrape_tln_probate(),
-        scrape_divorces(),
-        scrape_tax_delinquent(),
-    )
+    cp_recs,fc_recs,sh_recs,pr_recs,dv_recs,tx_recs=await asyncio.gather(
+        scrape_tln_common_pleas(),scrape_tln_foreclosure_notices(),
+        scrape_sheriff_sales(),scrape_tln_probate(),
+        scrape_divorces(),scrape_tax_delinquent())
     all_records=cp_recs+fc_recs+sh_recs+pr_recs+dv_recs+tx_recs
     logging.info("Total before enrich: %s",len(all_records))
-
     enriched=[]
     for r in all_records:
         try: enriched.append(enrich(r,parcels))
         except Exception as e:
-            logging.warning("Enrich %s: %s",r.doc_num,e)
-            enriched.append(r)
+            logging.warning("Enrich %s: %s",r.doc_num,e); enriched.append(r)
     all_records=enriched
-
-    all_records=cross_stack(all_records)
-    all_records=dedupe(all_records)
-    all_records.sort(
-        key=lambda r:(r.doc_type=="SHERIFF",r.hot_stack,r.distress_count,
-                      r.subject_to_score,r.score,r.filed),
-        reverse=True
-    )
-
+    all_records=cross_stack(all_records); all_records=dedupe(all_records)
+    all_records.sort(key=lambda r:(r.doc_type=="SHERIFF",r.hot_stack,r.distress_count,
+                                   r.subject_to_score,r.score,r.filed),reverse=True)
     parcel_matched=sum(1 for r in all_records if r.match_method!="unmatched")
-    logging.info("Final: %s | Matched: %s | Redfin: %s | Zillow: %s/%s",
+    logging.info("Final: %s | Matched: %s | Redfin: %s calls | Zillow: %s/%s",
                  len(all_records),parcel_matched,REDFIN_CALLS,ZILLOW_CALLS,ZILLOW_MAX_CALLS)
-
     payload=build_payload(all_records)
     for path in DEFAULT_OUTPUT_JSON_PATHS:
-        write_json(path,payload)
-        logging.info("Wrote %s (%s records)",path,len(all_records))
+        write_json(path,payload); logging.info("Wrote %s (%s records)",path,len(all_records))
     write_category_json(all_records)
     write_csv(all_records,DEFAULT_OUTPUT_CSV_PATH)
     if Path(args.out_csv)!=DEFAULT_OUTPUT_CSV_PATH:
         write_csv(all_records,Path(args.out_csv))
-
     logging.info(
         "=== DONE === Total:%s | Sheriff:%s | HotStack:%s | Probate:%s | "
         "PreFC:%s | Liens:%s | Tax:%s | Absentee:%s | OOS:%s | "
@@ -1516,8 +1365,7 @@ async def main():
         sum(1 for r in all_records if r.doc_type=="DIVORCE"),
         sum(1 for r in all_records if r.redfin_value),
         sum(1 for r in all_records if r.zillow_value),
-        parcel_matched,
-    )
+        parcel_matched)
 
 if __name__=="__main__":
     asyncio.run(main())
