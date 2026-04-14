@@ -1,272 +1,193 @@
 """
 download_parcels.py
-Downloads Lucas County parcel data using multiple fallback strategies.
-Now correctly handles the GIS field names: own, adrno, adrdir, adrstr, adrsuf, city, zip_code, parid, luc
-Called by scrape.yml workflow — cached weekly by GitHub Actions.
+Downloads ALL Lucas County parcel data using the confirmed GIS REST API layer 4.
+Uses pagination (resultOffset) to get all ~200k+ parcels, not just the first 2000.
+Saves as ParcelsAddress.csv for fetch.py to read.
+
+Confirmed working:
+  Base: https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer
+  Layer: 4
+  Fields: adrsuf2, adrdir, parid, city, own, adrsuf, statecode, zip_code, adrno, adrstr, luc, zone
 """
-import requests, zipfile, io, shutil, sys, time, csv, json
+import requests, sys, time, csv, json
 from pathlib import Path
 
-dest     = Path("data/parcels/ParcelsAddress.dbf")
 csv_dest = Path("data/parcels/ParcelsAddress.csv")
 HEADERS  = {"User-Agent": "Mozilla/5.0 (compatible; LucasCountyScraper/3.0)"}
 
-# ── GIS field name → our normalized field name mapping ────────────────────
-# These are the ACTUAL field names from the Lucas County GIS REST API
-# (confirmed from parcel_fields.json debug file)
-FIELD_MAP = {
-    # Owner name fields
-    "own":       "OWNER",
-    "name":      "OWNER",
-    "owner":     "OWNER",
-    "own1":      "OWNER",
-    # Address number
-    "adrno":     "ADRNO",
-    # Direction prefix (N, S, E, W)
-    "adrdir":    "ADRDIR",
-    # Street name
-    "adrstr":    "ADRSTR",
-    # Street suffix (ST, AVE, RD etc)
-    "adrsuf":    "ADRSUF",
-    "adrsuf2":   "ADRSUF2",
-    # City
-    "city":      "CITY",
-    # ZIP
-    "zip_code":  "ZIP",
-    "zipcode":   "ZIP",
-    "zip":       "ZIP",
-    # Parcel ID
-    "parid":     "PARID",
-    "parcel_id": "PARID",
-    "parcelid":  "PARID",
-    # Land use code
-    "luc":       "LUC",
-    # Mailing address (if present)
-    "mail_adr1": "MAILING_AD",
-    "mailadr1":  "MAILING_AD",
-    "mailing_ad":"MAILING_AD",
-    "property_a":"PROPERTY_A",
-}
+# Confirmed working GIS base and layer
+GIS_BASE  = "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer"
+GIS_LAYER = 4
 
-def normalize_row(row: dict) -> dict:
-    """Map GIS field names to our standard field names."""
-    out = {}
-    for k, v in row.items():
-        mapped = FIELD_MAP.get(k.lower().strip(), k.upper())
-        out[mapped] = str(v).strip() if v is not None else ""
-    # Build PROPERTY_A from components if not already present
-    if "PROPERTY_A" not in out or not out["PROPERTY_A"]:
-        parts = [
-            out.get("ADRNO",""),
-            out.get("ADRDIR",""),
-            out.get("ADRSTR",""),
-            out.get("ADRSUF",""),
-            out.get("ADRSUF2",""),
-        ]
-        addr = " ".join(p for p in parts if p).strip()
-        city = out.get("CITY","")
-        zip_ = out.get("ZIP","")
-        if addr and city:
-            out["PROPERTY_A"] = f"{addr}, {city} OH {zip_}".strip()
-        elif addr:
-            out["PROPERTY_A"] = addr
-    return out
+# Fields confirmed to exist on this layer
+# 'own' = owner name, 'adrno'+'adrdir'+'adrstr'+'adrsuf' = address parts
+# 'city' = city, 'zip_code' = zip, 'parid' = parcel ID, 'luc' = land use code
+FIELDS = "own,adrno,adrdir,adrstr,adrsuf,adrsuf2,city,zip_code,parid,luc,statecode"
 
-def has_useful_fields(row: dict) -> bool:
-    """Check if a row has owner or address data."""
-    keys_lower = {k.lower() for k in row.keys()}
-    owner_fields = {"own", "name", "owner", "own1", "ownername"}
-    addr_fields  = {"adrno", "adrstr", "property_a", "address", "addr"}
-    return bool(owner_fields & keys_lower or addr_fields & keys_lower)
-
-def save_csv(rows: list) -> bool:
-    """Save normalized rows to CSV."""
-    if not rows:
-        return False
-    # Normalize all rows
-    normalized = [normalize_row(r) for r in rows]
-    # Get all unique fieldnames
-    all_fields = list({k for r in normalized for k in r.keys()})
-    # Ensure key fields are first
-    priority = ["OWNER","PROPERTY_A","MAILING_AD","PARID","LUC","CITY","ZIP","ADRNO","ADRDIR","ADRSTR","ADRSUF"]
-    fieldnames = [f for f in priority if f in all_fields] + [f for f in all_fields if f not in priority]
-    with csv_dest.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(normalized)
-    print(f"      Saved {len(normalized)} rows to {csv_dest}")
-    return True
-
-def try_zip(url: str) -> bool:
-    print(f"[ZIP] {url[:90]}")
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=180)
-        print(f"      status={r.status_code} size={len(r.content):,}")
-        if r.status_code != 200 or len(r.content) < 10000:
-            return False
-        z = zipfile.ZipFile(io.BytesIO(r.content))
-        dbfs = sorted(
-            [n for n in z.namelist() if n.lower().endswith(".dbf")],
-            key=lambda n: ("address" not in n.lower(), n)
-        )
-        if not dbfs:
-            print(f"      No DBF. Files: {z.namelist()[:8]}")
-            return False
-        z.extract(dbfs[0], "data/parcels/")
-        for p in Path("data/parcels").rglob("*.dbf"):
-            if p != dest:
-                shutil.move(str(p), str(dest))
-                break
-        if dest.exists() and dest.stat().st_size > 50000:
-            print(f"      DBF OK: {dest.stat().st_size:,} bytes")
-            return True
-    except Exception as e:
-        print(f"      Error: {e}")
-    return False
-
-def try_gis_layer(base: str, idx: int, max_records: int = 2000) -> bool:
-    """
-    Query Lucas County GIS REST API for a specific layer.
-    Uses pagination to get more records if needed.
-    """
-    # Request all fields including the confirmed ones
-    fields = "own,name,adrno,adrdir,adrstr,adrsuf,adrsuf2,city,zip_code,parid,luc,statecode,zone,mh_area"
-    url = (f"{base}/{idx}/query"
-           f"?where=1%3D1"
-           f"&outFields={fields}"
-           f"&f=json"
-           f"&resultRecordCount={max_records}"
-           f"&returnGeometry=false")
-    print(f"[GIS] Layer {idx}: {base.split('/')[-2]}")
+def fetch_page(offset: int, page_size: int = 1000) -> list:
+    """Fetch one page of parcel records."""
+    url = (
+        f"{GIS_BASE}/{GIS_LAYER}/query"
+        f"?where=1%3D1"
+        f"&outFields={FIELDS}"
+        f"&f=json"
+        f"&resultRecordCount={page_size}"
+        f"&resultOffset={offset}"
+        f"&returnGeometry=false"
+        f"&orderByFields=parid"
+    )
     try:
         r = requests.get(url, headers=HEADERS, timeout=90)
         if r.status_code != 200:
-            print(f"      status={r.status_code}")
-            return False
+            print(f"  HTTP {r.status_code} at offset {offset}")
+            return []
         data = r.json()
         if "error" in data:
-            print(f"      API error: {data['error']}")
-            return False
+            print(f"  API error at offset {offset}: {data['error']}")
+            return []
         features = data.get("features", [])
-        if not features:
-            print(f"      No features")
-            return False
         rows = [f.get("attributes", {}) for f in features]
         rows = [r for r in rows if r]
-        print(f"      {len(rows)} features, fields: {list(rows[0].keys())[:8]}")
-        if not has_useful_fields(rows[0]):
-            print(f"      No useful fields")
-            return False
-        # Check if we got owner or address data
-        with_owner = sum(1 for r in rows if r.get("own") or r.get("name"))
-        with_addr  = sum(1 for r in rows if r.get("adrno") or r.get("adrstr"))
-        print(f"      owner={with_owner}/{len(rows)} addr={with_addr}/{len(rows)}")
-        if with_owner < 10 and with_addr < 10:
-            print(f"      Too few useful rows")
-            return False
-        return save_csv(rows)
+        # Check if there are more records
+        exceeded = data.get("exceededTransferLimit", False)
+        return rows, exceeded
     except Exception as e:
-        print(f"      Error: {e}")
-    return False
+        print(f"  Error at offset {offset}: {e}")
+        return [], False
 
-def try_gis_all_fields(base: str, idx: int) -> bool:
-    """Try with outFields=* to get everything."""
-    url = (f"{base}/{idx}/query"
-           f"?where=1%3D1"
-           f"&outFields=*"
-           f"&f=json"
-           f"&resultRecordCount=2000"
-           f"&returnGeometry=false")
-    print(f"[GIS*] Layer {idx} all fields")
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=90)
-        if r.status_code != 200:
-            return False
-        data = r.json()
-        features = data.get("features", [])
-        if not features:
-            return False
-        rows = [f.get("attributes", {}) for f in features]
-        rows = [r for r in rows if r]
-        if not rows:
-            return False
-        print(f"      {len(rows)} features | fields: {list(rows[0].keys())}")
-        if not has_useful_fields(rows[0]):
-            return False
-        with_owner = sum(1 for r in rows if r.get("own") or r.get("name") or r.get("OWNER"))
-        with_addr  = sum(1 for r in rows if r.get("adrno") or r.get("ADRNO") or r.get("adrstr"))
-        print(f"      owner={with_owner} addr={with_addr}")
-        if with_owner < 5 and with_addr < 5:
-            return False
-        return save_csv(rows)
-    except Exception as e:
-        print(f"      Error: {e}")
-    return False
+def build_property_address(row: dict) -> str:
+    """Build full property address from component GIS fields."""
+    parts = [
+        str(row.get("adrno","") or "").strip(),
+        str(row.get("adrdir","") or "").strip(),
+        str(row.get("adrstr","") or "").strip(),
+        str(row.get("adrsuf","") or "").strip(),
+        str(row.get("adrsuf2","") or "").strip(),
+    ]
+    addr = " ".join(p for p in parts if p and p != "None").strip()
+    city = str(row.get("city","") or "").strip()
+    zip_ = str(row.get("zip_code","") or "").strip()
+    if addr and city:
+        return f"{addr.title()}, {city.title()} OH {zip_}".strip()
+    return addr.title() if addr else ""
 
-# ── STRATEGY 1: Shapefile ZIP downloads ───────────────────────────────────
+def normalize_row(row: dict) -> dict:
+    """Convert GIS field names to our standard names."""
+    owner = str(row.get("own","") or "").strip().title()
+    parid = str(row.get("parid","") or "").strip()
+    luc   = str(row.get("luc","") or "").strip()
+    city  = str(row.get("city","") or "Toledo").strip().title()
+    zip_  = str(row.get("zip_code","") or "").strip()
+    prop_addr = build_property_address(row)
+    return {
+        "OWNER":      owner,
+        "PROPERTY_A": prop_addr,
+        "PARID":      parid,
+        "LUC":        luc,
+        "CITY":       city,
+        "ZIP":        zip_,
+        "ADRNO":      str(row.get("adrno","") or "").strip(),
+        "ADRDIR":     str(row.get("adrdir","") or "").strip(),
+        "ADRSTR":     str(row.get("adrstr","") or "").strip(),
+        "ADRSUF":     str(row.get("adrsuf","") or "").strip(),
+        "MAILING_AD": "",  # not in this layer — will use owner address lookup
+    }
+
 print("=" * 60)
-print("STRATEGY 1: Shapefile ZIP downloads")
-print("=" * 60)
-zip_urls = [
-    "https://opendata.arcgis.com/datasets/f37bcb63d5ac4a3b9d926ade17f72be5_0/downloads/data?format=shp&spatialRefId=4326",
-    "https://hub.arcgis.com/api/v3/datasets/f37bcb63d5ac4a3b9d926ade17f72be5_0/downloads/data?format=shp&spatialRefId=4326",
-    "https://lucascountyauditor.org/GIS/ParcelsAddress.zip",
-    "https://www.co.lucas.oh.us/GIS/ParcelsAddress.zip",
-]
-for url in zip_urls:
-    if try_zip(url):
-        print("SUCCESS: ZIP download")
-        sys.exit(0)
-    time.sleep(2)
-
-# ── STRATEGY 2: GIS REST API — confirmed working layers ───────────────────
-print("\n" + "=" * 60)
-print("STRATEGY 2: Lucas County GIS REST API (confirmed field names)")
+print("Lucas County GIS REST API — Paginated Parcel Download")
+print(f"Layer {GIS_LAYER} | Fields: {FIELDS}")
 print("=" * 60)
 
-# These are the confirmed working GIS service bases
-gis_bases = [
-    "https://lcaudgis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer",
-    "https://gis.co.lucas.oh.us/gisaudserver/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer",
-    "https://lcaudgis.co.lucas.oh.us/arcgis/rest/services/Hosted/Auditor_GIS_Layers/FeatureServer",
-]
+# First check how many total records exist
+try:
+    count_url = f"{GIS_BASE}/{GIS_LAYER}/query?where=1%3D1&returnCountOnly=true&f=json"
+    r = requests.get(count_url, headers=HEADERS, timeout=30)
+    if r.status_code == 200:
+        total = r.json().get("count", 0)
+        print(f"Total records in layer: {total:,}")
+    else:
+        total = 0
+        print(f"Could not get count (status {r.status_code})")
+except Exception as e:
+    total = 0
+    print(f"Count query error: {e}")
 
-for base in gis_bases:
-    # Try specific fields first (faster)
-    for idx in range(0, 8):
-        if try_gis_layer(base, idx):
-            print(f"SUCCESS: GIS layer {idx} with specific fields")
-            sys.exit(0)
-        time.sleep(1)
-    # Try all fields fallback
-    for idx in range(0, 8):
-        if try_gis_all_fields(base, idx):
-            print(f"SUCCESS: GIS layer {idx} with all fields")
-            sys.exit(0)
-        time.sleep(1)
+# Download all pages
+all_rows = []
+page_size = 1000
+offset = 0
+max_pages = 300  # safety limit (300k records max)
+consecutive_errors = 0
 
-# ── STRATEGY 3: Lucas County Auditor AREIS download ───────────────────────
-# The treasurer page mentions "Download AREIS" which is the Assessment Real Estate Info System
-print("\n" + "=" * 60)
-print("STRATEGY 3: AREIS / bulk data downloads")
-print("=" * 60)
-areis_urls = [
-    "https://www.lucascountytreasurer.org/areis/download",
-    "https://lucascountyauditor.org/areis/parcels.csv",
-    "https://lucascountyauditor.org/api/parcels/download",
-]
-for url in areis_urls:
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=60)
-        if r.status_code == 200 and len(r.content) > 10000:
-            csv_dest.write_bytes(r.content)
-            print(f"SUCCESS: AREIS download {len(r.content):,} bytes")
-            sys.exit(0)
-    except Exception as e:
-        print(f"  {url[:60]}: {e}")
-    time.sleep(1)
+print(f"\nDownloading pages (page_size={page_size})...")
 
-print("\nAll strategies exhausted.")
-print("Scraper will use Lucas County Auditor API for per-record lookups.")
-# Exit 0 so the workflow continues — don't block the scraper
+while offset <= max_pages * page_size:
+    result = fetch_page(offset, page_size)
+    if isinstance(result, tuple):
+        rows, exceeded = result
+    else:
+        rows = result; exceeded = False
+
+    if not rows:
+        consecutive_errors += 1
+        if consecutive_errors >= 3:
+            print(f"  3 consecutive errors at offset {offset}, stopping")
+            break
+        time.sleep(2)
+        offset += page_size
+        continue
+
+    consecutive_errors = 0
+    all_rows.extend(rows)
+
+    if offset % 10000 == 0 or offset < 5000:
+        print(f"  Offset {offset:>6,} | Downloaded {len(all_rows):>6,} rows | Last batch: {len(rows)}")
+
+    # If we got fewer rows than page_size, we've hit the end
+    if len(rows) < page_size:
+        print(f"  Last page at offset {offset} ({len(rows)} rows) — download complete")
+        break
+
+    if not exceeded and len(rows) < page_size:
+        break
+
+    offset += page_size
+    time.sleep(0.3)  # polite delay
+
+print(f"\nTotal rows downloaded: {len(all_rows):,}")
+
+if not all_rows:
+    print("ERROR: No rows downloaded!")
+    sys.exit(0)
+
+# Check data quality
+with_owner = sum(1 for r in all_rows if r.get("own","").strip())
+with_addr  = sum(1 for r in all_rows if r.get("adrno","").strip() or r.get("adrstr","").strip())
+print(f"With owner: {with_owner:,} | With address: {with_addr:,}")
+
+# Normalize and save
+print(f"\nNormalizing and saving to {csv_dest}...")
+normalized = [normalize_row(r) for r in all_rows]
+
+# Filter out rows with neither owner nor address
+useful = [r for r in normalized if r["OWNER"] or r["PROPERTY_A"]]
+print(f"Useful rows (owner or address): {len(useful):,}")
+
+fieldnames = ["OWNER","PROPERTY_A","PARID","LUC","CITY","ZIP","ADRNO","ADRDIR","ADRSTR","ADRSUF","MAILING_AD"]
+
+with csv_dest.open("w", newline="", encoding="utf-8") as f:
+    w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+    w.writeheader()
+    w.writerows(useful)
+
+size_kb = csv_dest.stat().st_size / 1024
+print(f"Saved: {csv_dest} ({size_kb:,.0f} KB, {len(useful):,} rows)")
+
+# Save a sample for debugging
+sample_path = Path("data/debug/parcel_csv_sample.json")
+sample_path.parent.mkdir(exist_ok=True)
+sample_path.write_text(json.dumps(useful[:10], indent=2))
+print(f"Sample saved to {sample_path}")
+
+print("\nSUCCESS: Parcel data ready for fetch.py")
 sys.exit(0)
